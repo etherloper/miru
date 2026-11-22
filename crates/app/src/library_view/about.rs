@@ -430,15 +430,7 @@ impl LibraryView {
                     release.version,
                     notes_suffix(&release.notes)
                 ),
-                Some(
-                    primary_button(
-                        "update-download",
-                        None,
-                        "Download",
-                        cx.listener(|this, _, _, cx| this.download_update(cx)),
-                    )
-                    .into_any_element(),
-                ),
+                None,
             ),
             UpdateState::Downloading { release, progress } => (
                 format!(
@@ -469,30 +461,15 @@ impl LibraryView {
                 ),
             ),
             UpdateState::Failed(message) => (message.to_string(), None),
-            UpdateState::DownloadFailed { message, .. } => (
-                message.to_string(),
-                Some(
-                    small_button(
-                        "update-retry",
-                        "Try again",
-                        false,
-                        cx.listener(|this, _, _, cx| this.download_update(cx)),
-                    )
-                    .into_any_element(),
-                ),
-            ),
+            UpdateState::DownloadFailed { message, .. } => (message.to_string(), None),
         };
         // The refresh button sits beside whatever the row offers, except mid-check or download.
-        let can_check = !matches!(
-            self.update,
-            UpdateState::Checking | UpdateState::Downloading { .. }
-        );
         let control = div()
             .flex()
             .items_center()
             .gap_3()
             .children(control)
-            .when(can_check, |d| d.child(self.check_button(cx)))
+            .children(self.update_icon_button(cx))
             .into_any_element();
         let control = Some(control);
         let auto = toggle(
@@ -511,16 +488,47 @@ impl LibraryView {
         ]
     }
 
-    /// Round refresh button that checks for a newer version.
-    fn check_button(&self, cx: &mut Context<Self>) -> AnyElement {
-        round_button(
-            "update-check",
-            "icons/restart.svg",
-            34.,
-            cx.listener(|this, _, _, cx| this.check_for_updates(cx)),
+    /// The borderless icon beside the update status: refresh to check for a new version, or a
+    /// download arrow once one is available (or its download failed). None while busy.
+    fn update_icon_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let (icon_path, tooltip): (&'static str, SharedString) = match &self.update {
+            UpdateState::Idle | UpdateState::UpToDate | UpdateState::Failed(_) => {
+                ("icons/restart.svg", "Check for updates".into())
+            }
+            UpdateState::Available(release) => (
+                "icons/download.svg",
+                format!("Download version {}", release.version).into(),
+            ),
+            UpdateState::DownloadFailed { .. } => ("icons/download.svg", "Try again".into()),
+            UpdateState::Checking | UpdateState::Downloading { .. } | UpdateState::Ready { .. } => {
+                return None;
+            }
+        };
+        let download = icon_path == "icons/download.svg";
+        Some(
+            div()
+                .id("update-icon")
+                .tab_index(0)
+                .focus_visible(theme::focus_ring)
+                .size(px(34.))
+                .flex_shrink_0()
+                .rounded_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .cursor_pointer()
+                .hover(|s| s.bg(theme::glass_hover()))
+                .child(icon(icon_path, 17., theme::text()))
+                .tooltip(theme::text_tooltip_owned(tooltip))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    if download {
+                        this.download_update(cx);
+                    } else {
+                        this.check_for_updates(cx);
+                    }
+                }))
+                .into_any_element(),
         )
-        .tooltip(theme::text_tooltip("Check for updates"))
-        .into_any_element()
     }
 }
 
