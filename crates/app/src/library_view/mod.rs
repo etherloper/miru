@@ -211,6 +211,19 @@ fn shelf_art_height(id: &str) -> f32 {
     }
 }
 
+/// A shelf row being dragged with the left mouse button.
+struct ShelfDrag {
+    scroll: ScrollHandle,
+    /// Pointer x and the row's scroll offset when the button went down.
+    start_x: f32,
+    start_offset: f32,
+    /// Moved past the threshold: it's a drag, not a click.
+    moved: bool,
+}
+
+/// Pointer travel before a press on a row becomes a drag.
+const DRAG_THRESHOLD: f32 = 5.;
+
 /// A shelf scrolling to `to` after an arrow press.
 struct ShelfGlide {
     id: &'static str,
@@ -328,6 +341,10 @@ pub struct LibraryView {
     hovered_arrow: Option<&'static str>,
     /// Shelf scroll started by an arrow press, advanced each frame.
     shelf_glide: Option<ShelfGlide>,
+    /// A shelf being dragged with the mouse, and when a drag that moved last ended (the click
+    /// that ends a drag must not open the card under the pointer).
+    shelf_drag: Option<ShelfDrag>,
+    shelf_drag_ended: Option<Instant>,
     /// Logo image sizes read from file headers, keyed by path.
     image_sizes: std::cell::RefCell<HashMap<String, Option<(u32, u32)>>>,
     /// Scroll positions of the home and detail pages; the nav turns solid once scrolled.
@@ -423,6 +440,8 @@ impl LibraryView {
             hovered_shelf: None,
             hovered_arrow: None,
             shelf_glide: None,
+            shelf_drag: None,
+            shelf_drag_ended: None,
             image_sizes: Default::default(),
             home_scroll: ScrollHandle::new(),
             detail_scroll: ScrollHandle::new(),
@@ -1078,6 +1097,41 @@ impl LibraryView {
         self.navigate(Page::Browse(tab), cx);
     }
 
+    /// Follows a shelf drag: the row moves with the pointer, clamped to its ends.
+    fn drag_shelf(&mut self, event: &gpui::MouseMoveEvent, cx: &mut Context<Self>) {
+        let Some(drag) = &mut self.shelf_drag else {
+            return;
+        };
+        // The button came up outside the window: the drag is over.
+        if event.pressed_button != Some(gpui::MouseButton::Left) {
+            self.end_shelf_drag();
+            return;
+        }
+        let dx = f32::from(event.position.x) - drag.start_x;
+        if !drag.moved && dx.abs() < DRAG_THRESHOLD {
+            return;
+        }
+        drag.moved = true;
+        let max = f32::from(drag.scroll.max_offset().x);
+        let x = (drag.start_offset + dx).clamp(-max, 0.);
+        let y = drag.scroll.offset().y;
+        drag.scroll.set_offset(gpui::point(px(x), y));
+        cx.notify();
+    }
+
+    fn end_shelf_drag(&mut self) {
+        if self.shelf_drag.take().is_some_and(|d| d.moved) {
+            self.shelf_drag_ended = Some(Instant::now());
+        }
+    }
+
+    /// Whether a click should be ignored because it ends a drag.
+    pub(super) fn click_ends_drag(&self) -> bool {
+        self.shelf_drag.as_ref().is_some_and(|d| d.moved)
+            || self
+                .shelf_drag_ended
+                .is_some_and(|t| t.elapsed() < Duration::from_millis(250))
+    }
     fn set_hover(&mut self, id: &SharedString, hovered: bool, cx: &mut Context<Self>) {
         let touches_hero =
             id.starts_with("hero") || self.hovered.as_ref().is_some_and(|h| h.starts_with("hero"));
@@ -1342,6 +1396,14 @@ impl Render for LibraryView {
             .on_mouse_down(
                 gpui::MouseButton::Navigate(gpui::NavigationDirection::Forward),
                 cx.listener(|this, _, _, cx| this.go_forward(cx)),
+            )
+            // Shelf drags: follow the pointer anywhere in the window, end on release.
+            .on_mouse_move(
+                cx.listener(|this, event: &gpui::MouseMoveEvent, _, cx| this.drag_shelf(event, cx)),
+            )
+            .on_mouse_up(
+                gpui::MouseButton::Left,
+                cx.listener(|this, _, _, _| this.end_shelf_drag()),
             )
             // Re-render on scroll so the nav backdrop follows the scroll position.
             .on_scroll(cx.listener(|_, _, _, cx| cx.notify()))

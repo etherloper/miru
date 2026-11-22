@@ -699,7 +699,16 @@ impl Render for Card {
             .focus_visible(theme::focus_ring)
             .cursor_pointer()
             .on_hover(cx.listener(|this, hovered: &bool, _, cx| this.set_hovered(*hovered, cx)))
-            .on_click(cx.listener(move |this, _, _, cx| on_click(this, cx)))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                // Releasing after dragging the row lands on a card; that isn't a click on it.
+                let dragging = this
+                    .library
+                    .upgrade()
+                    .is_some_and(|library| library.read(cx).click_ends_drag());
+                if !dragging {
+                    on_click(this, cx);
+                }
+            }))
             .child(body)
     }
 }

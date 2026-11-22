@@ -405,6 +405,21 @@ impl LibraryView {
         div()
             .id(SharedString::from(format!("{id}-row")))
             .relative()
+            // Press and drag to scroll the row (the library view follows the pointer from here).
+            .on_mouse_down(
+                gpui::MouseButton::Left,
+                cx.listener(move |this, event: &gpui::MouseDownEvent, _, _| {
+                    if let Some(scroll) = this.shelf_scrolls.get(id).cloned() {
+                        this.shelf_glide = None;
+                        this.shelf_drag = Some(ShelfDrag {
+                            start_offset: f32::from(scroll.offset().x),
+                            scroll,
+                            start_x: f32::from(event.position.x),
+                            moved: false,
+                        });
+                    }
+                }),
+            )
             .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
                 if *hovered {
                     if this.hovered_shelf != Some(id) {
