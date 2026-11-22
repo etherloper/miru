@@ -820,7 +820,11 @@ impl LibraryView {
     /// while the library itself is drawing can be dropped, which left the hero frozen while
     /// hovered and then jumping ahead.
     fn redraw_hero(&self, cx: &mut Context<Self>) {
-        self.hero.view().update(cx, |_, cx| cx.notify());
+        // Marks the view dirty by id rather than updating it: this runs from the hero's own
+        // hover handler, where updating the hero again would be a re-entrant update (a crash).
+        let id = self.hero.view().entity_id();
+        let app: &mut gpui::App = cx;
+        app.notify(id);
     }
 
     fn add_folders(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {

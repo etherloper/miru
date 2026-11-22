@@ -220,6 +220,12 @@ fn init_logging(paths: Option<&AppPaths>) {
 fn main() {
     let resolved = AppPaths::resolve();
     init_logging(resolved.as_ref().ok());
+    // Release builds have no console, so a panic would vanish without a trace; log it first.
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        tracing::error!("panic: {info}");
+        default_hook(info);
+    }));
     let initial = std::env::args().nth(1);
     let (paths, db) = match resolved.and_then(|p| Ok((Db::open(&p.db)?, p))) {
         Ok((db, paths)) => (paths, db),
