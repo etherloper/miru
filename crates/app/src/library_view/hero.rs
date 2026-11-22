@@ -20,7 +20,7 @@ pub(super) struct HeroView {
 pub(super) struct HeroState {
     featured: Vec<LibraryItem>,
     index: usize,
-    previous: Option<usize>,
+    previous: Option<LibraryItem>,
     epoch: usize,
     hovering: bool,
     height: f32,
@@ -69,7 +69,7 @@ impl LibraryView {
         let state = HeroState {
             featured: self.featured.clone(),
             index: self.hero_index,
-            previous: self.hero_previous,
+            previous: self.hero_previous.clone(),
             epoch: self.hero_epoch,
             hovering: self.hovered.as_ref().is_some_and(|h| h.starts_with("hero")),
             height,

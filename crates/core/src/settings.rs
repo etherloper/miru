@@ -135,6 +135,58 @@ pub fn title_sort_key(title: &str) -> String {
     lower
 }
 
+/// A sidebar destination the user can reorder (Settings always stays at the bottom).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NavItem {
+    Search,
+    Home,
+    Movies,
+    Shows,
+}
+
+impl NavItem {
+    pub const ALL: [Self; 4] = [Self::Search, Self::Home, Self::Movies, Self::Shows];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Search => "Search",
+            Self::Home => "Home",
+            Self::Movies => "Movies",
+            Self::Shows => "TV Shows",
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Search => "search",
+            Self::Home => "home",
+            Self::Movies => "movies",
+            Self::Shows => "shows",
+        }
+    }
+
+    fn parse(s: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|v| v.as_str() == s)
+    }
+
+    /// Reads a stored order: unknown names and repeats are dropped, and anything missing is
+    /// added at the end, so every item appears exactly once.
+    fn parse_order(s: &str) -> Vec<Self> {
+        let mut order: Vec<Self> = Vec::new();
+        for item in s.split(',').filter_map(|v| Self::parse(v.trim())) {
+            if !order.contains(&item) {
+                order.push(item);
+            }
+        }
+        for item in Self::ALL {
+            if !order.contains(&item) {
+                order.push(item);
+            }
+        }
+        order
+    }
+}
+
 /// Seek steps offered in Settings, in seconds.
 pub const SEEK_STEPS: [u32; 3] = [10, 15, 30];
 
@@ -152,6 +204,10 @@ pub struct Settings {
     pub subtitle_size: SubtitleSize,
     /// Cycle through featured titles on Home.
     pub rotate_featured: bool,
+    /// Feature titles from the whole library on Home, not just the recently added.
+    pub feature_whole_library: bool,
+    /// Sidebar destinations, top to bottom.
+    pub sidebar_order: Vec<NavItem>,
     /// Start the next episode automatically when one finishes.
     pub autoplay_next: bool,
     /// Sidebar shows icons only.
@@ -178,6 +234,8 @@ impl Default for Settings {
             subtitle_language: None,
             subtitle_size: SubtitleSize::Medium,
             rotate_featured: true,
+            feature_whole_library: false,
+            sidebar_order: NavItem::ALL.to_vec(),
             autoplay_next: true,
             sidebar_collapsed: false,
             movie_sort: LibrarySort::Title,
@@ -197,6 +255,8 @@ const AUDIO_LANG: &str = "playback.audio_language";
 const SUB_LANG: &str = "playback.subtitle_language";
 const SUB_SIZE: &str = "playback.subtitle_size";
 const ROTATE: &str = "home.rotate_featured";
+const WHOLE_LIBRARY: &str = "home.feature_whole_library";
+const SIDEBAR_ORDER: &str = "ui.sidebar_order";
 const AUTOPLAY: &str = "playback.autoplay_next";
 const SIDEBAR: &str = "ui.sidebar_collapsed";
 const PARSER_VERSION_KEY: &str = "scan.parser_version";
@@ -238,6 +298,13 @@ impl Db {
                 .and_then(|v| SubtitleSize::parse(&v))
                 .unwrap_or_default(),
             rotate_featured: bool_of(self.setting(ROTATE)?, defaults.rotate_featured),
+            feature_whole_library: bool_of(
+                self.setting(WHOLE_LIBRARY)?,
+                defaults.feature_whole_library,
+            ),
+            sidebar_order: self
+                .setting(SIDEBAR_ORDER)?
+                .map_or(defaults.sidebar_order, |v| NavItem::parse_order(&v)),
             autoplay_next: bool_of(self.setting(AUTOPLAY)?, defaults.autoplay_next),
             sidebar_collapsed: bool_of(self.setting(SIDEBAR)?, defaults.sidebar_collapsed),
             movie_sort: self
@@ -274,6 +341,15 @@ impl Db {
             (SUB_LANG, s.subtitle_language.clone().unwrap_or_default()),
             (SUB_SIZE, s.subtitle_size.as_str().to_string()),
             (ROTATE, s.rotate_featured.to_string()),
+            (WHOLE_LIBRARY, s.feature_whole_library.to_string()),
+            (
+                SIDEBAR_ORDER,
+                s.sidebar_order
+                    .iter()
+                    .map(|i| i.as_str())
+                    .collect::<Vec<_>>()
+                    .join(","),
+            ),
             (AUTOPLAY, s.autoplay_next.to_string()),
             (SIDEBAR, s.sidebar_collapsed.to_string()),
             (MOVIE_SORT, s.movie_sort.as_str().to_string()),
@@ -369,6 +445,13 @@ mod tests {
             subtitle_language: Some("en".into()),
             subtitle_size: SubtitleSize::ExtraLarge,
             rotate_featured: false,
+            feature_whole_library: true,
+            sidebar_order: vec![
+                NavItem::Home,
+                NavItem::Shows,
+                NavItem::Movies,
+                NavItem::Search,
+            ],
             autoplay_next: false,
             sidebar_collapsed: true,
             movie_sort: LibrarySort::Newest,
@@ -388,6 +471,20 @@ mod tests {
         })
         .unwrap();
         assert_eq!(db.settings().unwrap().audio_language, None);
+    }
+
+    #[test]
+    fn sidebar_order_is_repaired() {
+        use NavItem::*;
+        assert_eq!(
+            NavItem::parse_order("shows,home"),
+            vec![Shows, Home, Search, Movies]
+        );
+        assert_eq!(
+            NavItem::parse_order("movies, bogus,movies,search"),
+            vec![Movies, Search, Home, Shows]
+        );
+        assert_eq!(NavItem::parse_order(""), NavItem::ALL.to_vec());
     }
 
     #[test]

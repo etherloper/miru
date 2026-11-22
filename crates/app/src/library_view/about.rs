@@ -506,28 +506,21 @@ impl LibraryView {
         };
         let download = icon_path == "icons/download.svg";
         Some(
-            div()
-                .id("update-icon")
-                .tab_index(0)
-                .focus_visible(theme::focus_ring)
-                .size(px(34.))
-                .flex_shrink_0()
-                .rounded_full()
-                .flex()
-                .items_center()
-                .justify_center()
-                .cursor_pointer()
-                .hover(|s| s.bg(theme::glass_hover()))
-                .child(icon(icon_path, 17., theme::text()))
-                .tooltip(theme::text_tooltip_owned(tooltip))
-                .on_click(cx.listener(move |this, _, _, cx| {
+            theme::icon_button(
+                "update-icon",
+                icon_path,
+                34.,
+                true,
+                cx.listener(move |this, _, _, cx| {
                     if download {
                         this.download_update(cx);
                     } else {
                         this.check_for_updates(cx);
                     }
-                }))
-                .into_any_element(),
+                }),
+            )
+            .tooltip(theme::text_tooltip_owned(tooltip))
+            .into_any_element(),
         )
     }
 }

@@ -268,6 +268,34 @@ pub fn round_button_styled(
         .on_click(on_click)
 }
 
+/// Borderless round icon button for quiet controls (Settings rows). A disabled one is dimmed
+/// and ignores clicks.
+pub fn icon_button(
+    id: impl Into<gpui::ElementId>,
+    icon_path: &'static str,
+    size: f32,
+    enabled: bool,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> Stateful<Div> {
+    let ink = if enabled { text() } else { text_tertiary() };
+    div()
+        .id(id)
+        .size(px(size))
+        .flex_shrink_0()
+        .rounded_full()
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(icon(icon_path, size * 0.5, ink))
+        .when(enabled, |d| {
+            d.tab_index(0)
+                .focus_visible(focus_ring)
+                .cursor_pointer()
+                .hover(|s| s.bg(glass_hover()))
+                .on_click(on_click)
+        })
+}
+
 /// Frosted circle for controls floating over video. GPUI can't blur what's behind an element,
 /// so frosting is approximated with layers: a dark tint that mutes the picture, a milky white
 /// wash on top, a bright rim, an inner top highlight and a soft drop shadow.

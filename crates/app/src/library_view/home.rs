@@ -52,7 +52,7 @@ impl LibraryView {
         let fresh = self.hero_epoch > 0 && self.hero_changed_at.elapsed() < HERO_FADE;
         let mut stage = div().absolute().inset_0();
         if fresh {
-            if let Some(previous) = self.hero_previous.and_then(|i| self.featured.get(i)) {
+            if let Some(previous) = &self.hero_previous {
                 stage = stage.child(hero_art(previous));
             }
             let (id, animation) = fade("hero-art", self.hero_epoch);
@@ -410,12 +410,16 @@ impl LibraryView {
                 gpui::MouseButton::Left,
                 cx.listener(move |this, event: &gpui::MouseDownEvent, _, _| {
                     if let Some(scroll) = this.shelf_scrolls.get(id).cloned() {
-                        this.shelf_glide = None;
+                        // Pressing a gliding row catches it; that press doesn't open a card.
+                        let caught = this.shelf_glide.take().is_some_and(|g| g.id == id);
+                        let x = f32::from(event.position.x);
                         this.shelf_drag = Some(ShelfDrag {
+                            id,
                             start_offset: f32::from(scroll.offset().x),
                             scroll,
-                            start_x: f32::from(event.position.x),
-                            moved: false,
+                            start_x: x,
+                            moved: caught,
+                            samples: VecDeque::from([(Instant::now(), x)]),
                         });
                     }
                 }),

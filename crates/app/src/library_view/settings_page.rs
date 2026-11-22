@@ -114,6 +114,54 @@ impl LibraryView {
         cx.notify();
     }
 
+    /// One row per sidebar destination, with buttons to move it up or down.
+    fn sidebar_order_rows(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let order = &self.settings.sidebar_order;
+        let last = order.len().saturating_sub(1);
+        order
+            .iter()
+            .enumerate()
+            .map(|(ix, item)| {
+                let mover = |up: bool, cx: &mut Context<Self>| {
+                    let (id, icon_path, enabled, tip) = if up {
+                        ("nav-order-up", "icons/chevron-up.svg", ix > 0, "Move up")
+                    } else {
+                        (
+                            "nav-order-down",
+                            "icons/chevron-down.svg",
+                            ix < last,
+                            "Move down",
+                        )
+                    };
+                    theme::icon_button(
+                        (id, ix),
+                        icon_path,
+                        30.,
+                        enabled,
+                        cx.listener(move |this, _, _, cx| this.move_nav_item(ix, up, cx)),
+                    )
+                    .when(enabled, |d| d.tooltip(theme::text_tooltip(tip)))
+                };
+                let controls = div()
+                    .flex()
+                    .items_center()
+                    .gap_1()
+                    .child(mover(true, cx))
+                    .child(mover(false, cx));
+                setting_row(item.label(), None, Some(controls.into_any_element()))
+                    .into_any_element()
+            })
+            .collect()
+    }
+
+    fn move_nav_item(&mut self, ix: usize, up: bool, cx: &mut Context<Self>) {
+        let len = self.settings.sidebar_order.len();
+        let target = if up { ix.checked_sub(1) } else { Some(ix + 1) };
+        if let Some(target) = target.filter(|t| *t < len && ix < len) {
+            self.update_settings(|s| s.sidebar_order.swap(ix, target), cx);
+        }
+    }
+
     pub(super) fn remove_root(&mut self, root_id: i64, cx: &mut Context<Self>) {
         self.confirm_remove = None;
         if let Err(e) = self.db.remove_root(root_id) {
@@ -246,6 +294,17 @@ impl LibraryView {
             }),
         );
 
+        let whole_library = toggle(
+            "feature-whole-library",
+            s.feature_whole_library,
+            cx.listener(|this, _, _, cx| {
+                this.update_settings(|s| s.feature_whole_library = !s.feature_whole_library, cx);
+                this.hero_avoid = None;
+                this.refresh_featured();
+                this.redraw_hero(cx);
+            }),
+        );
+
         // About.
         let data_dir = self.paths.db.parent().map(std::path::Path::to_path_buf);
         let data_label = data_dir
@@ -313,7 +372,14 @@ impl LibraryView {
                 Some(rotate.into_any_element()),
             )
             .into_any_element(),
+            setting_row(
+                "Feature the whole library",
+                Some("Pick featured titles from everything in your library, not just what was added recently."),
+                Some(whole_library.into_any_element()),
+            )
+            .into_any_element(),
         ];
+        let sidebar_rows = self.sidebar_order_rows(cx);
         let history_rows = self.history_rows(cx);
         let metadata_rows = self.metadata_rows(window, cx);
         let mut about_rows = vec![
@@ -372,6 +438,11 @@ impl LibraryView {
                                 playback_rows,
                             ))
                             .child(section("Home", "", home_rows))
+                            .child(section(
+                                "Sidebar",
+                                "Choose the order of the sidebar. Settings always stays at the bottom.",
+                                sidebar_rows,
+                            ))
                             .child(section(
                                 "Metadata",
                                 "Where posters, artwork and details come from.",

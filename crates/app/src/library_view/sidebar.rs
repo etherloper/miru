@@ -1,5 +1,7 @@
 //! Window chrome: the sidebar, the top strip and the empty-library screen.
 
+use miru_core::settings::NavItem;
+
 use super::*;
 
 impl LibraryView {
@@ -160,34 +162,25 @@ impl LibraryView {
                     .flex()
                     .flex_col()
                     .gap(px(NAV_ITEM_GAP))
-                    .child(item(
-                        "nav-search",
-                        "Search",
-                        "icons/search.svg",
-                        matches!(self.page, Page::Browse(Tab::Search)),
-                        Box::new(cx.listener(|this, _, _, cx| this.open_search(cx))),
-                    ))
-                    .child(tab_item(
-                        "nav-home",
-                        "Home",
-                        "icons/home.svg",
-                        Tab::Home,
-                        cx,
-                    ))
-                    .child(tab_item(
-                        "nav-movies",
-                        "Movies",
-                        "icons/film.svg",
-                        Tab::Movies,
-                        cx,
-                    ))
-                    .child(tab_item(
-                        "nav-shows",
-                        "TV Shows",
-                        "icons/tv.svg",
-                        Tab::Shows,
-                        cx,
-                    )),
+                    // In the order chosen in Settings.
+                    .children(self.settings.sidebar_order.iter().map(|nav| match nav {
+                        NavItem::Search => item(
+                            "nav-search",
+                            nav.label(),
+                            "icons/search.svg",
+                            matches!(self.page, Page::Browse(Tab::Search)),
+                            Box::new(cx.listener(|this, _, _, cx| this.open_search(cx))),
+                        ),
+                        NavItem::Home => {
+                            tab_item("nav-home", nav.label(), "icons/home.svg", Tab::Home, cx)
+                        }
+                        NavItem::Movies => {
+                            tab_item("nav-movies", nav.label(), "icons/film.svg", Tab::Movies, cx)
+                        }
+                        NavItem::Shows => {
+                            tab_item("nav-shows", nav.label(), "icons/tv.svg", Tab::Shows, cx)
+                        }
+                    })),
             )
             .child(div().flex_1())
             // A waiting update: the button downloads and installs it in place (see about.rs).

@@ -1,7 +1,8 @@
 //! Library browsing: a cinematic home (rotating hero + shelves), movie and show grids, and
 //! full-bleed detail pages.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, VecDeque};
+use std::hash::{BuildHasher, Hash, Hasher};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -213,16 +214,28 @@ fn shelf_art_height(id: &str) -> f32 {
 
 /// A shelf row being dragged with the left mouse button.
 struct ShelfDrag {
+    id: &'static str,
     scroll: ScrollHandle,
     /// Pointer x and the row's scroll offset when the button went down.
     start_x: f32,
     start_offset: f32,
     /// Moved past the threshold: it's a drag, not a click.
     moved: bool,
+    /// Recent pointer positions, to measure how fast the row was flung on release.
+    samples: VecDeque<(Instant, f32)>,
 }
 
 /// Pointer travel before a press on a row becomes a drag.
 const DRAG_THRESHOLD: f32 = 5.;
+/// Pointer movement this recent sets the speed of a fling.
+const FLING_WINDOW: Duration = Duration::from_millis(100);
+/// Holding still this long before letting go cancels the fling.
+const FLING_STALE: Duration = Duration::from_millis(60);
+/// Slower releases just stop where they are.
+const FLING_MIN_SPEED: f32 = 250.;
+const FLING_MAX_SPEED: f32 = 8000.;
+/// How far a fling carries: its release speed times this many seconds.
+const FLING_REACH: f32 = 0.3;
 
 /// A shelf scrolling to `to` after an arrow press.
 struct ShelfGlide {
@@ -301,7 +314,13 @@ pub struct LibraryView {
     featured: Vec<LibraryItem>,
     continue_cards: Vec<ContinueCard>,
     hero_index: usize,
-    hero_previous: Option<usize>,
+    /// The title shown before the current one, faded out over the change.
+    hero_previous: Option<LibraryItem>,
+    /// Whole-library mode: the shuffle (new each launch) and how many sets have been dealt.
+    hero_seed: u64,
+    hero_round: u64,
+    /// Left out of the next set: the title on screen when it was dealt.
+    hero_avoid: Option<TitleKey>,
     hero_epoch: usize,
     hovered: Option<SharedString>,
     unhovered: Option<SharedString>,
@@ -411,6 +430,9 @@ impl LibraryView {
             continue_cards: Vec::new(),
             hero_index: 0,
             hero_previous: None,
+            hero_seed: std::collections::hash_map::RandomState::new().hash_one(0u8),
+            hero_round: 0,
+            hero_avoid: None,
             hero_epoch: 0,
             hovered: None,
             unhovered: None,
@@ -565,16 +587,44 @@ impl LibraryView {
             tracing::error!("reloading library: {e}");
             self.sync = SyncStatus::Failed(format!("Could not read library: {e}").into());
         }
-        // Prefer titles with backdrops for the hero; fill up with the rest.
-        let has_backdrop = |i: &&LibraryItem| {
+        self.refresh_featured();
+    }
+
+    /// Titles for the hero: the recently added, or with "whole library" on, a shuffle of
+    /// everything that changes each launch and each time the banner comes back round.
+    fn pick_featured(&self) -> Vec<LibraryItem> {
+        let pool: Vec<&LibraryItem> = if self.settings.feature_whole_library {
+            let mut all: Vec<&LibraryItem> = self.movies.iter().chain(self.shows.iter()).collect();
+            if all.len() > HERO_ITEMS {
+                all.retain(|i| self.hero_avoid.as_ref() != Some(&i.key));
+            }
+            all.sort_by_cached_key(|i| {
+                let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                (self.hero_seed, self.hero_round, &i.key).hash(&mut hasher);
+                hasher.finish()
+            });
+            all
+        } else {
+            self.recent.iter().collect()
+        };
+        // Prefer titles with backdrops; fill up with the rest.
+        let has_backdrop = |i: &LibraryItem| {
             i.metadata
                 .as_ref()
                 .is_some_and(|m| m.backdrop_file.is_some())
         };
-        let mut featured: Vec<LibraryItem> =
-            self.recent.iter().filter(has_backdrop).cloned().collect();
-        featured.extend(self.recent.iter().filter(|i| !has_backdrop(i)).cloned());
-        featured.truncate(HERO_ITEMS);
+        let (with, without): (Vec<&LibraryItem>, Vec<&LibraryItem>) =
+            pool.into_iter().partition(|i| has_backdrop(i));
+        with.into_iter()
+            .chain(without)
+            .take(HERO_ITEMS)
+            .cloned()
+            .collect()
+    }
+
+    /// Re-picks the hero's titles, starting from the first if the set changed.
+    fn refresh_featured(&mut self) {
+        let featured = self.pick_featured();
         if featured
             .iter()
             .map(|i| &i.key)
@@ -805,7 +855,7 @@ impl LibraryView {
                         && !view.playing
                     {
                         tracing::debug!("hero: automatic change");
-                        view.show_hero((view.hero_index + 1) % view.featured.len(), cx);
+                        view.step_hero(1, cx);
                     }
                 });
                 if alive.is_err() {
@@ -819,10 +869,35 @@ impl LibraryView {
     /// Steps the featured banner forwards or backwards, wrapping at either end.
     fn step_hero(&mut self, direction: isize, cx: &mut Context<Self>) {
         let count = self.featured.len();
+        if direction > 0 && self.hero_index + 1 == count && self.deal_featured(cx) {
+            return;
+        }
         if count > 1 {
             let next = (self.hero_index as isize + direction).rem_euclid(count as isize);
             self.show_hero(next as usize, cx);
         }
+    }
+
+    /// Whole-library mode: after the last title, deals a fresh set instead of going back to
+    /// the first. Returns false when that doesn't apply.
+    fn deal_featured(&mut self, cx: &mut Context<Self>) -> bool {
+        if !self.settings.feature_whole_library
+            || self.movies.len() + self.shows.len() <= HERO_ITEMS
+        {
+            return false;
+        }
+        let current = self.featured.get(self.hero_index).cloned();
+        self.hero_round += 1;
+        self.hero_avoid = current.as_ref().map(|i| i.key.clone());
+        self.featured = self.pick_featured();
+        tracing::debug!(round = self.hero_round, "hero: new set");
+        self.hero_previous = current;
+        self.hero_index = 0;
+        self.hero_epoch += 1;
+        self.hero_changed_at = Instant::now();
+        self.redraw_hero(cx);
+        cx.notify();
+        true
     }
 
     fn show_hero(&mut self, index: usize, cx: &mut Context<Self>) {
@@ -830,7 +905,7 @@ impl LibraryView {
             return;
         }
         tracing::debug!(from = self.hero_index, to = index, "hero changed");
-        self.hero_previous = Some(self.hero_index);
+        self.hero_previous = self.featured.get(self.hero_index).cloned();
         self.hero_index = index;
         self.hero_epoch += 1;
         self.hero_changed_at = Instant::now();
@@ -1107,10 +1182,21 @@ impl LibraryView {
         };
         // The button came up outside the window: the drag is over.
         if event.pressed_button != Some(gpui::MouseButton::Left) {
-            self.end_shelf_drag();
+            self.end_shelf_drag(cx);
             return;
         }
-        let dx = f32::from(event.position.x) - drag.start_x;
+        let pointer = f32::from(event.position.x);
+        let now = Instant::now();
+        drag.samples.push_back((now, pointer));
+        while drag.samples.len() > 2
+            && drag
+                .samples
+                .front()
+                .is_some_and(|(t, _)| now.duration_since(*t) > FLING_WINDOW)
+        {
+            drag.samples.pop_front();
+        }
+        let dx = pointer - drag.start_x;
         if !drag.moved && dx.abs() < DRAG_THRESHOLD {
             return;
         }
@@ -1122,10 +1208,40 @@ impl LibraryView {
         cx.notify();
     }
 
-    fn end_shelf_drag(&mut self) {
-        if self.shelf_drag.take().is_some_and(|d| d.moved) {
-            self.shelf_drag_ended = Some(Instant::now());
+    /// Ends a shelf drag. A quick swipe carries on as a glide that slows to a stop, going
+    /// further the faster the row was flung.
+    fn end_shelf_drag(&mut self, cx: &mut Context<Self>) {
+        let Some(drag) = self.shelf_drag.take() else {
+            return;
+        };
+        if !drag.moved {
+            return;
         }
+        self.shelf_drag_ended = Some(Instant::now());
+        let speed = fling_speed(&drag.samples).clamp(-FLING_MAX_SPEED, FLING_MAX_SPEED);
+        if speed.abs() < FLING_MIN_SPEED || !theme::motion_enabled() {
+            return;
+        }
+        // Glides count distance along the row, the opposite sign to the scroll offset.
+        let from = -f32::from(drag.scroll.offset().x);
+        let max = f32::from(drag.scroll.max_offset().x);
+        let to = (from - speed * FLING_REACH).clamp(0., max);
+        if (to - from).abs() < 1. {
+            return;
+        }
+        // The glide's ease-out starts at five times its average speed; this duration makes it
+        // leave at the speed of the swipe.
+        let duration = (5. * (to - from).abs() / speed.abs()).clamp(0.2, 1.6);
+        self.shelf_glide = Some(ShelfGlide {
+            id: drag.id,
+            scroll: drag.scroll,
+            from,
+            to,
+            last: from,
+            started: Instant::now(),
+            duration,
+        });
+        cx.notify();
     }
 
     /// Whether a click should be ignored because it ends a drag.
@@ -1406,7 +1522,7 @@ impl Render for LibraryView {
             )
             .on_mouse_up(
                 gpui::MouseButton::Left,
-                cx.listener(|this, _, _, _| this.end_shelf_drag()),
+                cx.listener(|this, _, _, cx| this.end_shelf_drag(cx)),
             )
             // Re-render on scroll so the nav backdrop follows the scroll position.
             .on_scroll(cx.listener(|_, _, _, cx| cx.notify()))
@@ -1433,4 +1549,25 @@ impl Render for LibraryView {
         }
         root
     }
+}
+
+/// Pointer speed (px/s) over the last moments of a drag; 0 if it was held still before release.
+fn fling_speed(samples: &VecDeque<(Instant, f32)>) -> f32 {
+    let now = Instant::now();
+    let (Some(&(first_at, first_x)), Some(&(last_at, last_x))) = (
+        samples
+            .iter()
+            .find(|(t, _)| now.duration_since(*t) <= FLING_WINDOW),
+        samples.back(),
+    ) else {
+        return 0.;
+    };
+    if now.duration_since(last_at) > FLING_STALE {
+        return 0.;
+    }
+    let elapsed = last_at.duration_since(first_at).as_secs_f32();
+    if elapsed < 0.008 {
+        return 0.;
+    }
+    (last_x - first_x) / elapsed
 }
