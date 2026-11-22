@@ -76,8 +76,11 @@ One value from `.env` is built into the release:
   update from (Settings → About, or automatically once a day). It can be this repo; the app reads
   its releases without signing in.
 
-To ship an update: bump `version` in `Cargo.toml`, run `scripts/package-windows.ps1`, then
-`scripts/publish-release.ps1 -Notes "What changed"` (needs the GitHub CLI, signed in).
+To ship an update: bump `version` in `Cargo.toml`, commit, then tag and push it
+(`git tag v0.1.2`, `git push origin master v0.1.2`). The [Release workflow](.github/workflows/release.yml)
+builds the installer and portable zip on GitHub and publishes them; installed copies then offer the
+update. It can also be run by hand from the Actions tab as a build-only dry run. To publish from
+your own PC instead, run `scripts/package-windows.ps1` then `scripts/publish-release.ps1`.
 
 ## Controls
 

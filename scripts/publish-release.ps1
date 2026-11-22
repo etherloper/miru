@@ -1,9 +1,12 @@
 # Publishes the installer and portable zip built by package-windows.ps1 as a GitHub release,
 # which installed copies of Miru then offer as an update.
 #
-# Before running: bump `version` in Cargo.toml, run scripts/package-windows.ps1, and make sure
-# the GitHub CLI is signed in (`gh auth login`). The release goes to MIRU_UPDATE_REPO from
-# .env, which must be a public repo (the app reads it without signing in).
+# Normally the release workflow (.github/workflows/release.yml) runs this on GitHub when a
+# version tag is pushed. To publish from this PC instead: bump `version` in Cargo.toml, run
+# scripts/package-windows.ps1, and sign in the GitHub CLI (`gh auth login`).
+#
+# The release goes to MIRU_UPDATE_REPO (environment variable, or .env), which must be a public
+# repo (the app reads it without signing in). Without -Notes, GitHub writes notes from commits.
 #
 #   .\scripts\publish-release.ps1 -Notes "What changed in this version"
 
@@ -15,16 +18,16 @@ $ErrorActionPreference = 'Continue'
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
-$repo = $null
+$repo = $env:MIRU_UPDATE_REPO
 $envFile = Join-Path $root '.env'
-if (Test-Path $envFile) {
+if (-not $repo -and (Test-Path $envFile)) {
     foreach ($line in Get-Content $envFile) {
         if ($line -match '^\s*(?:export\s+)?MIRU_UPDATE_REPO\s*=\s*(.*)$') {
             $repo = $Matches[1].Trim().Trim('"').Trim("'")
         }
     }
 }
-if (-not $repo) { throw 'Set MIRU_UPDATE_REPO=owner/name in .env first.' }
+if (-not $repo) { throw 'Set MIRU_UPDATE_REPO=owner/name (environment or .env) first.' }
 if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
     throw 'The GitHub CLI (gh) is needed: https://cli.github.com'
 }
@@ -47,7 +50,8 @@ New-Item -ItemType Directory -Force $upload | Out-Null
 Copy-Item $installer (Join-Path $upload 'Miru-x64-setup.exe') -ErrorAction Stop
 Copy-Item $portable (Join-Path $upload 'Miru-x64-portable.zip') -ErrorAction Stop
 
-gh release create "v$version" (Join-Path $upload 'Miru-x64-setup.exe') (Join-Path $upload 'Miru-x64-portable.zip') --repo $repo --title "Miru $version" --notes $Notes
+$notesArgs = if ($Notes) { @('--notes', $Notes) } else { @('--generate-notes') }
+gh release create "v$version" (Join-Path $upload 'Miru-x64-setup.exe') (Join-Path $upload 'Miru-x64-portable.zip') --repo $repo --title "Miru $version" @notesArgs
 if ($LASTEXITCODE -ne 0) { throw 'Publishing failed.' }
 Remove-Item -Recurse -Force $upload
 Write-Host "Published Miru $version to github.com/$repo."
