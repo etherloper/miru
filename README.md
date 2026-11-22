@@ -1,6 +1,25 @@
 # Miru
 
-A local media player built with Rust, GPUI and libmpv.
+Miru (見る, "to watch") is a local media player for Windows with a cinematic library: posters,
+backdrops and details for your movies and shows, Continue Watching, and a clean full-screen player.
+Built with Rust, GPUI and libmpv.
+
+## Download
+
+| Platform | Download | Notes |
+|---|---|---|
+| Windows 10/11 (64-bit) | [**Installer** (Miru-x64-setup.exe)](https://github.com/etherloper/miru/releases/latest/download/Miru-x64-setup.exe) | Recommended. Installs for your user, no admin prompt, updates itself. |
+| Windows 10/11 (64-bit) | [Portable (Miru-x64-portable.zip)](https://github.com/etherloper/miru/releases/latest/download/Miru-x64-portable.zip) | Unzip and run `miru.exe`. No automatic updates. |
+
+These always point to the [latest release](https://github.com/etherloper/miru/releases/latest);
+older versions are on the [releases page](https://github.com/etherloper/miru/releases).
+
+The installer isn't code-signed yet, so Windows SmartScreen may say "Windows protected your PC" the
+first time: choose **More info**, then **Run anyway**.
+
+**Getting started:** open **Settings**, add your movie and TV folders, then add a TMDB key under
+**Settings → Metadata** for posters, artwork and details (keys are free at
+[themoviedb.org](https://www.themoviedb.org/settings/api)).
 
 ## How video is composited (Windows)
 
@@ -89,6 +108,16 @@ their own.
   `cargo run -p miru-core --bin miru-scan -- library.db D:\Media` (add `--search <query>`).
 - `crates/metadata`: TMDB client, artwork cache, local artwork discovery
 - `crates/player`: libmpv wrapper (`Player`, `PlaybackState`)
-- `crates/app`: GPUI app: `library_view.rs` (home, grids, show page), `player_view.rs`,
-  `library_sync.rs` (background scan and metadata), `video_host.rs` (native child window)
+- `crates/app`: GPUI app: `library_view/` (one module per page: home, grids, detail, search,
+  settings, cast, Fix match), `player_view.rs`, `library_sync.rs` (background scan and metadata),
+  `image_cache.rs` (display-sized artwork), `updates.rs`, `video_host.rs` (native child window)
 - `vendor/gpui-pre-windows`: patched GPUI Windows backend
+
+## License
+
+Miru is free software under the [GNU General Public License v3.0](LICENSE) (or any later version).
+
+It builds on [mpv](https://mpv.io) (libmpv, bundled in releases under its GPL build),
+[GPUI](https://github.com/zed-industries/zed) (Apache-2.0; the Windows backend is vendored with a
+small patch), and data from [TMDB](https://www.themoviedb.org). This product uses the TMDB API but
+is not endorsed or certified by TMDB.
