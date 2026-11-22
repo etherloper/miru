@@ -65,8 +65,35 @@ impl LibraryView {
             .justify_center()
             .cursor_pointer()
             .hover(|s| s.bg(rgba(0xffffff0f)))
-            // Same size as the navigation icons below it.
-            .child(icon("icons/sidebar.svg", 18., theme::text_tertiary()))
+            .relative()
+            .group("sidebar-toggle")
+            .when(!collapsed, |d| {
+                // Same size as the navigation icons below it.
+                d.child(icon("icons/sidebar.svg", 18., theme::text_tertiary()))
+            })
+            // Collapsed, the button shows the Miru ensō and turns into the expand control on
+            // hover (both are stacked; hovering swaps which one is visible).
+            .when(collapsed, |d| {
+                let layer = || {
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                };
+                d.child(
+                    layer()
+                        .group_hover("sidebar-toggle", |s| s.opacity(0.))
+                        .child(icon("icons/enso.svg", 20., theme::text())),
+                )
+                .child(
+                    layer()
+                        .opacity(0.)
+                        .group_hover("sidebar-toggle", |s| s.opacity(1.))
+                        .child(icon("icons/sidebar.svg", 18., theme::text_secondary())),
+                )
+            })
             .tooltip(theme::text_tooltip(if collapsed {
                 "Expand sidebar  Ctrl+B"
             } else {
