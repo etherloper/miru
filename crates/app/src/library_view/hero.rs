@@ -33,6 +33,10 @@ pub(super) struct Hero {
 }
 
 impl Hero {
+    pub fn view(&self) -> &Entity<HeroView> {
+        &self.view
+    }
+
     pub fn new(cx: &mut Context<LibraryView>) -> Self {
         let library = cx.weak_entity();
         Self {
@@ -72,10 +76,10 @@ impl LibraryView {
         };
         let changed = self.hero.drawn.borrow().as_ref() != Some(&state);
         if changed {
-            self.hero.view.update(cx, |hero, cx| {
-                hero.height = height;
-                cx.notify();
-            });
+            self.hero.view.update(cx, |hero, _| hero.height = height);
+            // Redraw after this frame: a notify made mid-draw can be dropped.
+            let view = self.hero.view.clone();
+            cx.defer(move |cx| view.update(cx, |_, cx| cx.notify()));
             *self.hero.drawn.borrow_mut() = Some(state);
         }
         self.hero

@@ -68,6 +68,8 @@ const CONTINUE_W: f32 = 392.;
 const CAPTION_H: f32 = 46.;
 const HERO_ITEMS: usize = 5;
 const HERO_INTERVAL: Duration = Duration::from_secs(9);
+/// How often the rotation checks whether the interval has passed.
+const HERO_TICK: Duration = Duration::from_millis(250);
 /// Distance of the banner's page dots from its bottom edge (the shelves overlap below).
 const HERO_DOTS_BOTTOM: f32 = 116.;
 /// Left/Right page the banner only while the home page is scrolled less than this.
@@ -766,18 +768,21 @@ impl LibraryView {
     fn start_hero_rotation(&self, cx: &mut Context<Self>) {
         cx.spawn(async move |this, cx| {
             loop {
-                cx.background_executor().timer(HERO_INTERVAL).await;
+                // Checked often against the time of the last change, rather than waiting a full
+                // interval per tick: a tick landing a hair early would otherwise be skipped,
+                // doubling the gap. Any change (automatic or manual) restarts the wait.
+                cx.background_executor().timer(HERO_TICK).await;
                 let alive = this.update(cx, |view, cx| {
                     let on_home = matches!(view.page, Page::Browse(Tab::Home));
-                    // A manual change restarts the wait before the next automatic one.
-                    let recently_changed = view.hero_changed_at.elapsed() < HERO_INTERVAL;
+                    let due = view.hero_changed_at.elapsed() >= HERO_INTERVAL;
                     if on_home
-                        && !recently_changed
+                        && due
                         && view.featured.len() > 1
                         && theme::motion_enabled()
                         && view.settings.rotate_featured
                         && !view.playing
                     {
+                        tracing::debug!("hero: automatic change");
                         view.show_hero((view.hero_index + 1) % view.featured.len(), cx);
                     }
                 });
@@ -802,11 +807,20 @@ impl LibraryView {
         if index == self.hero_index || index >= self.featured.len() {
             return;
         }
+        tracing::debug!(from = self.hero_index, to = index, "hero changed");
         self.hero_previous = Some(self.hero_index);
         self.hero_index = index;
         self.hero_epoch += 1;
         self.hero_changed_at = Instant::now();
+        self.redraw_hero(cx);
         cx.notify();
+    }
+
+    /// Tells the cached hero view to redraw. Done right where its state changes: a request made
+    /// while the library itself is drawing can be dropped, which left the hero frozen while
+    /// hovered and then jumping ahead.
+    fn redraw_hero(&self, cx: &mut Context<Self>) {
+        self.hero.view().update(cx, |_, cx| cx.notify());
     }
 
     fn add_folders(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
@@ -1061,6 +1075,11 @@ impl LibraryView {
     }
 
     fn set_hover(&mut self, id: &SharedString, hovered: bool, cx: &mut Context<Self>) {
+        let touches_hero =
+            id.starts_with("hero") || self.hovered.as_ref().is_some_and(|h| h.starts_with("hero"));
+        if touches_hero {
+            self.redraw_hero(cx);
+        }
         if hovered {
             if self.hovered.as_ref() != Some(id) {
                 self.unhovered = self.hovered.take();
