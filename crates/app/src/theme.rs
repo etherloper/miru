@@ -428,3 +428,8 @@ impl Render for TextTooltip {
 pub fn text_tooltip(label: &'static str) -> impl Fn(&mut Window, &mut App) -> gpui::AnyView {
     move |_, cx| cx.new(|_| TextTooltip(label.into())).into()
 }
+
+/// Like [`text_tooltip`], for a label made at runtime.
+pub fn text_tooltip_owned(label: SharedString) -> impl Fn(&mut Window, &mut App) -> gpui::AnyView {
+    move |_, cx| cx.new(|_| TextTooltip(label.clone())).into()
+}

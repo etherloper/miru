@@ -23,15 +23,17 @@ pub(super) enum UpdateState {
         installer: PathBuf,
     },
     Failed(SharedString),
+    /// Downloading or starting the installer failed; the release is kept for a retry.
+    DownloadFailed {
+        release: Release,
+        message: SharedString,
+    },
 }
 
-impl UpdateState {
-    pub fn is_available(&self) -> bool {
-        matches!(
-            self,
-            Self::Available(_) | Self::Downloading { .. } | Self::Ready { .. }
-        )
-    }
+/// `MIRU_PREVIEW_UPDATE=1`: pretend an update is available and simulate downloading it, to
+/// check the update UI without a real release.
+fn preview_mode() -> bool {
+    std::env::var_os("MIRU_PREVIEW_UPDATE").is_some()
 }
 
 impl LibraryView {
@@ -214,7 +216,7 @@ impl LibraryView {
     pub(super) fn auto_check_for_updates(&mut self, cx: &mut Context<Self>) {
         // MIRU_PREVIEW_UPDATE=1 shows the update notice without a real release, for checking
         // its design. Downloading the pretend update fails harmlessly.
-        if std::env::var_os("MIRU_PREVIEW_UPDATE").is_some() {
+        if preview_mode() {
             let Version(major, minor, patch) = Version::current();
             self.update = UpdateState::Available(Release {
                 version: Version(major, minor, patch + 1),
@@ -269,11 +271,17 @@ impl LibraryView {
         .detach();
     }
 
-    fn download_update(&mut self, cx: &mut Context<Self>) {
-        let UpdateState::Available(release) = &self.update else {
-            return;
+    pub(super) fn download_update(&mut self, cx: &mut Context<Self>) {
+        let release = match &self.update {
+            UpdateState::Available(release) | UpdateState::DownloadFailed { release, .. } => {
+                release.clone()
+            }
+            _ => return,
         };
-        let release = release.clone();
+        if preview_mode() {
+            self.simulate_download(release, cx);
+            return;
+        }
         self.update = UpdateState::Downloading {
             release: release.clone(),
             progress: 0.,
@@ -311,7 +319,10 @@ impl LibraryView {
                     Ok(installer) => UpdateState::Ready { release, installer },
                     Err(e) => {
                         tracing::warn!("update download failed: {e:#}");
-                        UpdateState::Failed(format!("Download failed: {e:#}").into())
+                        UpdateState::DownloadFailed {
+                            release,
+                            message: format!("Download failed: {e:#}").into(),
+                        }
                     }
                 };
                 cx.notify();
@@ -321,18 +332,61 @@ impl LibraryView {
         .detach();
     }
 
-    fn install_update(&mut self, cx: &mut Context<Self>) {
-        let UpdateState::Ready { installer, .. } = &self.update else {
+    pub(super) fn install_update(&mut self, cx: &mut Context<Self>) {
+        let UpdateState::Ready { installer, release } = &self.update else {
             return;
         };
-        match updates::install_and_restart(installer) {
+        let started = if preview_mode() {
+            Err(anyhow::anyhow!(
+                "this is only a preview, so there is nothing to install"
+            ))
+        } else {
+            updates::install_and_restart(installer)
+        };
+        match started {
             Ok(()) => cx.quit(),
             Err(e) => {
-                self.update =
-                    UpdateState::Failed(format!("Couldn't start the installer: {e:#}").into());
+                self.update = UpdateState::DownloadFailed {
+                    release: release.clone(),
+                    message: format!("Couldn't start the installer: {e:#}").into(),
+                };
                 cx.notify();
             }
         }
+    }
+
+    /// Preview mode: fills the progress over a few seconds, then reports the update ready.
+    fn simulate_download(&mut self, release: Release, cx: &mut Context<Self>) {
+        self.update = UpdateState::Downloading {
+            release: release.clone(),
+            progress: 0.,
+        };
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            for step in 1..=40 {
+                cx.background_executor()
+                    .timer(Duration::from_millis(80))
+                    .await;
+                let alive = this.update(cx, |view, cx| {
+                    if let UpdateState::Downloading { progress, .. } = &mut view.update {
+                        *progress = step as f32 / 40.;
+                        cx.notify();
+                    }
+                });
+                if alive.is_err() {
+                    return;
+                }
+            }
+            this.update(cx, |view, cx| {
+                view.update = UpdateState::Ready {
+                    release,
+                    installer: PathBuf::from("preview-setup.exe"),
+                };
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// Update rows for About: status with the next action, and automatic checks.
@@ -403,6 +457,18 @@ impl LibraryView {
                 ),
             ),
             UpdateState::Failed(message) => (message.to_string(), Some(self.check_button(cx))),
+            UpdateState::DownloadFailed { message, .. } => (
+                message.to_string(),
+                Some(
+                    small_button(
+                        "update-retry",
+                        "Try again",
+                        false,
+                        cx.listener(|this, _, _, cx| this.download_update(cx)),
+                    )
+                    .into_any_element(),
+                ),
+            ),
         };
         let auto = toggle(
             "update-auto",
@@ -458,4 +524,123 @@ fn unix_now() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs() as i64)
+}
+
+impl LibraryView {
+    /// The sidebar's update button, which runs the whole update in place: "Update available"
+    /// starts the download, the button fills as it downloads, then "Restart to update" installs.
+    /// A failed download offers a retry. `None` when no update is waiting.
+    pub(super) fn update_button(
+        &self,
+        collapsed: bool,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        const RADIUS: f32 = 8.;
+        let (label, icon_path, progress, action): (
+            String,
+            &'static str,
+            Option<f32>,
+            Option<UpdateAction>,
+        ) = match &self.update {
+            UpdateState::Available(_) => (
+                "Update available".into(),
+                "icons/download.svg",
+                None,
+                Some(UpdateAction::Download),
+            ),
+            UpdateState::Downloading { progress, .. } => (
+                format!("Downloading… {}%", (progress * 100.).round()),
+                "icons/download.svg",
+                Some(*progress),
+                None,
+            ),
+            UpdateState::Ready { .. } => (
+                "Restart to update".into(),
+                "icons/restart.svg",
+                None,
+                Some(UpdateAction::Install),
+            ),
+            UpdateState::DownloadFailed { .. } => (
+                "Update failed · Retry".into(),
+                "icons/restart.svg",
+                None,
+                Some(UpdateAction::Download),
+            ),
+            _ => return None,
+        };
+        let tooltip: SharedString = match &self.update {
+            UpdateState::DownloadFailed { message, .. } => message.clone(),
+            _ => label.clone().into(),
+        };
+        // While downloading, a dimmed base with a white fill growing from the left; otherwise
+        // solid white. The fill rounds its own corners (children aren't clipped to rounding).
+        let fill = progress.map(|p| {
+            div()
+                .absolute()
+                .top_0()
+                .bottom_0()
+                .left_0()
+                .w(gpui::relative(p.clamp(0., 1.)))
+                .bg(theme::text())
+                .rounded_l(px(RADIUS))
+                .when(p > 0.97, |d| d.rounded_r(px(RADIUS)))
+        });
+        let button = div()
+            .id("nav-update")
+            .tab_index(0)
+            .focus_visible(theme::focus_ring)
+            .relative()
+            .mx_3()
+            .mb_1()
+            .h(px(NAV_ITEM_H))
+            .px_3()
+            .flex()
+            .items_center()
+            .when(collapsed, |d| d.justify_center())
+            .gap_3()
+            .rounded(px(RADIUS))
+            .text_sm()
+            .font_weight(FontWeight::SEMIBOLD)
+            .text_color(theme::bg())
+            .shadow(theme::card_shadow(0.))
+            .bg(if progress.is_some() {
+                rgba(0xffffff73)
+            } else {
+                theme::text()
+            })
+            .children(fill)
+            .child(
+                div()
+                    .relative()
+                    .flex()
+                    .child(icon(icon_path, 18., theme::bg())),
+            )
+            .when(!collapsed, |d| {
+                d.child(div().relative().truncate().child(label))
+            })
+            .when(collapsed, |d| {
+                d.tooltip(theme::text_tooltip_owned(tooltip.clone()))
+            })
+            .when(
+                !collapsed && matches!(self.update, UpdateState::DownloadFailed { .. }),
+                |d| d.tooltip(theme::text_tooltip_owned(tooltip.clone())),
+            );
+        let button = match action {
+            Some(action) => button
+                .cursor_pointer()
+                .hover(|s| s.bg(rgba(0xffffffd9)))
+                .on_click(cx.listener(move |this, _, _, cx| match action {
+                    UpdateAction::Download => this.download_update(cx),
+                    UpdateAction::Install => this.install_update(cx),
+                })),
+            None => button,
+        };
+        Some(button.into_any_element())
+    }
+}
+
+#[derive(Clone, Copy)]
+enum UpdateAction {
+    Download,
+    Install,
 }

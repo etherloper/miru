@@ -190,40 +190,8 @@ impl LibraryView {
                     )),
             )
             .child(div().flex_1())
-            // When a new version is waiting: a white button the shape of a sidebar row (it opens
-            // Settings, where the update installs). The one solid element in the sidebar, so it
-            // is noticed without being loud.
-            .when(self.update.is_available(), |d| {
-                d.child(
-                    div()
-                        .id("nav-update")
-                        .tab_index(0)
-                        .focus_visible(theme::focus_ring)
-                        .mx_3()
-                        .mb_1()
-                        .h(px(NAV_ITEM_H))
-                        .px_3()
-                        .flex()
-                        .items_center()
-                        .when(collapsed, |d| d.justify_center())
-                        .gap_3()
-                        .rounded(px(8.))
-                        .cursor_pointer()
-                        .text_sm()
-                        .font_weight(FontWeight::MEDIUM)
-                        .bg(theme::text())
-                        .text_color(theme::bg())
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .shadow(theme::card_shadow(0.))
-                        .hover(|s| s.bg(rgba(0xffffffd9)))
-                        .child(icon("icons/download.svg", 18., theme::bg()))
-                        .when(collapsed, |d| {
-                            d.tooltip(theme::text_tooltip("Update available"))
-                        })
-                        .when(!collapsed, |d| d.child("Update available"))
-                        .on_click(cx.listener(|this, _, _, cx| this.navigate(Page::Settings, cx))),
-                )
-            })
+            // A waiting update: the button downloads and installs it in place (see about.rs).
+            .children(self.update_button(collapsed, cx))
             .child(div().pb_4().child(item(
                 "nav-settings",
                 "Settings",
