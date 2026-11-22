@@ -50,7 +50,9 @@ New-Item -ItemType Directory -Force $upload | Out-Null
 Copy-Item $installer (Join-Path $upload 'Miru-x64-setup.exe') -ErrorAction Stop
 Copy-Item $portable (Join-Path $upload 'Miru-x64-portable.zip') -ErrorAction Stop
 
-$notesArgs = if ($Notes) { @('--notes', $Notes) } else { @('--generate-notes') }
+# Typed as an array: a one-item result would otherwise become a plain string, which splatting
+# hands to gh one character at a time.
+[string[]]$notesArgs = if ($Notes) { @('--notes', $Notes) } else { @('--generate-notes') }
 gh release create "v$version" (Join-Path $upload 'Miru-x64-setup.exe') (Join-Path $upload 'Miru-x64-portable.zip') --repo $repo --title "Miru $version" @notesArgs
 if ($LASTEXITCODE -ne 0) { throw 'Publishing failed.' }
 Remove-Item -Recurse -Force $upload
