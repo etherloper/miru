@@ -166,6 +166,11 @@ const MIGRATIONS: &[&str] = &[
     );
     CREATE INDEX title_cast_person ON title_cast(person_id);
 ",
+    r"
+    -- Repair: episodes whose frames were grabbed before their show was matched were marked as
+    -- checked against TMDB and never asked again. Ask once more for any without TMDB details.
+    UPDATE episode_art SET tmdb_checked = 0 WHERE source != 'tmdb';
+",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -382,6 +382,11 @@ impl LibraryView {
                                 "Removing an item clears its resume point and watched mark. Files are not deleted.",
                                 history_rows,
                             ))
+                            .child(section(
+                                "Keyboard shortcuts",
+                                "Alt+← and the mouse back button work anywhere in the library.",
+                                shortcut_rows(),
+                            ))
                             .child(section("About", "", about_rows)),
                     ),
             )
@@ -878,4 +883,112 @@ pub(super) fn small_button(
         })
         .child(label)
         .on_click(on_click)
+}
+
+/// Keyboard shortcuts shown in Settings, by area: (action, keys). Each entry in `keys` is one
+/// way to do it; `+` joins keys pressed together.
+/// An action and the keys that do it.
+type Shortcut = (&'static str, &'static [&'static str]);
+
+const SHORTCUTS: [(&str, &[Shortcut]); 3] = [
+    (
+        "Library",
+        &[
+            ("Search", &["Ctrl+K", "Ctrl+F"]),
+            ("Home, Movies, TV Shows", &["Ctrl+1", "Ctrl+2", "Ctrl+3"]),
+            ("Collapse or expand the sidebar", &["Ctrl+B"]),
+            ("Back", &["Alt+←", "Backspace", "Esc"]),
+            ("Forward", &["Alt+→"]),
+            ("Move between items", &["←", "→", "↑", "↓", "Tab"]),
+            ("Open the focused item", &["Enter", "Space"]),
+            ("Previous or next featured title (Home)", &["←", "→"]),
+        ],
+    ),
+    (
+        "Search",
+        &[
+            ("Choose a result", &["↑", "↓"]),
+            ("Open it", &["Enter"]),
+            ("Show all results", &["Ctrl+Enter"]),
+            ("Close", &["Esc"]),
+        ],
+    ),
+    (
+        "Player",
+        &[
+            ("Play or pause", &["Space", "K"]),
+            ("Skip back or forward", &["←", "→", "J", "L"]),
+            ("Back to the start", &["Home"]),
+            ("Close a menu, then the player", &["Esc", "Backspace"]),
+            ("Volume", &["Mouse wheel"]),
+            ("Play or pause with the mouse", &["Right-click"]),
+        ],
+    ),
+];
+
+/// A key label, e.g. `Ctrl+K` drawn as two small keys.
+fn key_combo(combo: &str) -> AnyElement {
+    div()
+        .flex()
+        .items_center()
+        .gap_1()
+        .children(combo.split('+').map(|key| {
+            div()
+                .min_w(px(24.))
+                .h(px(24.))
+                .px_1p5()
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded(px(6.))
+                .bg(rgba(0xffffff0f))
+                .border_1()
+                .border_color(theme::glass_border())
+                .text_xs()
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(theme::text_secondary())
+                .child(key.to_string())
+        }))
+        .into_any_element()
+}
+
+/// Rows for the Keyboard shortcuts section: a small heading per area, then one row per action.
+pub(super) fn shortcut_rows() -> Vec<AnyElement> {
+    let mut rows = Vec::new();
+    for (area, shortcuts) in SHORTCUTS {
+        rows.push(
+            div()
+                .px_5()
+                .pt_4()
+                .pb_1()
+                .text_xs()
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(theme::text_tertiary())
+                .child(area)
+                .into_any_element(),
+        );
+        for (action, keys) in shortcuts {
+            rows.push(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_6()
+                    .px_5()
+                    .py_2()
+                    .child(div().flex_1().min_w_0().text_sm().child(*action))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_wrap()
+                            .justify_end()
+                            .items_center()
+                            .gap_2()
+                            .children(keys.iter().map(|k| key_combo(k))),
+                    )
+                    .into_any_element(),
+            );
+        }
+    }
+    rows.push(div().h(px(12.)).into_any_element());
+    rows
 }

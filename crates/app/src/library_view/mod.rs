@@ -85,9 +85,10 @@ const PANEL_EPISODE_HITS: usize = 4;
 const EPISODE_ART_BATCH: u32 = 4;
 const EPISODE_CARD_W: f32 = 352.;
 const SYNOPSIS_LINE_H: f32 = 20.;
-/// Height the episode row needs under a show's hero: heading, padding and a card with its
-/// two-line synopsis.
-const EPISODES_ROW_H: f32 = 390.;
+/// Height of everything under a show's hero, so a page that fits doesn't scroll: heading row
+/// (34) + gap (8) + shelf padding (16 + 24) + episode card with a two-line synopsis (304) +
+/// bottom padding (32). The band the row overlaps is added to the hero separately.
+const EPISODES_ROW_H: f32 = 34. + 8. + 16. + 24. + 304. + 32.;
 /// How far the episode row rises into the bottom of a show's hero.
 const EPISODES_OVERLAP: f32 = 56.;
 /// Widest each kind of artwork is decoded at: about twice its layout width, for high-DPI
@@ -768,13 +769,9 @@ impl LibraryView {
                 cx.background_executor().timer(HERO_INTERVAL).await;
                 let alive = this.update(cx, |view, cx| {
                     let on_home = matches!(view.page, Page::Browse(Tab::Home));
-                    // Don't change the hero under the pointer while someone is reading it.
-                    let hovering_hero =
-                        view.hovered.as_ref().is_some_and(|h| h.starts_with("hero"));
                     // A manual change restarts the wait before the next automatic one.
                     let recently_changed = view.hero_changed_at.elapsed() < HERO_INTERVAL;
                     if on_home
-                        && !hovering_hero
                         && !recently_changed
                         && view.featured.len() > 1
                         && theme::motion_enabled()

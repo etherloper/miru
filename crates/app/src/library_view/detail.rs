@@ -298,7 +298,7 @@ impl LibraryView {
                     // Rises into the bottom of the hero, over its faded artwork.
                     .relative()
                     .mt(px(-EPISODES_OVERLAP))
-                    .pb_16()
+                    .pb_8()
                     .flex()
                     .flex_col()
                     .gap_2()

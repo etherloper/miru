@@ -205,7 +205,9 @@ impl Db {
         };
         let join = |items: &[String]| (!items.is_empty()).then(|| items.join("\n"));
         // A show matched to a different TMDB entry than before has episode art from the wrong
-        // series; drop it so it is fetched again for the new match.
+        // series; drop it so it is fetched again for the new match. A show matched for the first
+        // time keeps its grabbed frames but asks TMDB again for names, synopses and stills (they
+        // were marked checked while TMDB had nothing to offer for an unmatched show).
         if key.kind == ItemKind::Show {
             let previous: Option<i64> = self
                 .conn
@@ -219,6 +221,12 @@ impl Db {
             if previous.is_some() && previous != m.tmdb_id {
                 self.conn.execute(
                     "DELETE FROM episode_art WHERE file_id IN
+                        (SELECT id FROM media_files WHERE kind = 'episode' AND title = ?1 COLLATE NOCASE)",
+                    [&key.title],
+                )?;
+            } else if previous.is_none() && m.tmdb_id.is_some() {
+                self.conn.execute(
+                    "UPDATE episode_art SET tmdb_checked = 0 WHERE source != 'tmdb' AND file_id IN
                         (SELECT id FROM media_files WHERE kind = 'episode' AND title = ?1 COLLATE NOCASE)",
                     [&key.title],
                 )?;
@@ -591,6 +599,54 @@ mod rematch_tests {
             ..key.clone()
         };
         assert_eq!(db.match_override(&other).unwrap(), None);
+    }
+
+    #[test]
+    fn a_first_match_rechecks_frame_only_episodes() {
+        let mut db = Db::open_in_memory().unwrap();
+        let root = db.add_root("/m").unwrap();
+        let b = db.batch().unwrap();
+        let ep = ParsedMedia::Episode {
+            show: "Dead End Job".into(),
+            season: 1,
+            episode: 1,
+            episode_end: None,
+            title: None,
+        };
+        b.upsert_file(root.id, "/m/e1.mkv", Fingerprint { size: 1, mtime: 1 }, &ep)
+            .unwrap();
+        b.commit().unwrap();
+        let file = db.file_by_path("/m/e1.mkv").unwrap().unwrap().id;
+        let key = TitleKey {
+            kind: ItemKind::Show,
+            title: "Dead End Job".into(),
+            year: None,
+        };
+        // Not found on TMDB at first: a frame is grabbed and marked as checked.
+        db.save_metadata(&key, &MetadataResult::NotFound).unwrap();
+        let frame = EpisodeArt {
+            source: ArtSource::Frame,
+            still_file: Some("/cache/frames/1.jpg".into()),
+            name: None,
+            overview: None,
+            runtime_min: None,
+            tmdb_checked: true,
+        };
+        db.save_episode_art(file, &frame).unwrap();
+
+        // Matched later: the frame stays, but TMDB is asked again.
+        let matched = MetadataResult::Matched(Metadata {
+            tmdb_id: Some(289_517),
+            ..Metadata::default()
+        });
+        db.save_metadata(&key, &matched).unwrap();
+        let art = db
+            .episode_art("Dead End Job")
+            .unwrap()
+            .remove(&file)
+            .unwrap();
+        assert_eq!(art.still_file.as_deref(), Some("/cache/frames/1.jpg"));
+        assert!(!art.tmdb_checked);
     }
 }
 
