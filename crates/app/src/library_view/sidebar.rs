@@ -190,7 +190,9 @@ impl LibraryView {
                     )),
             )
             .child(div().flex_1())
-            // A quiet notice when a new version is waiting; it opens Settings, where it installs.
+            // When a new version is waiting: a white button the shape of a sidebar row (it opens
+            // Settings, where the update installs). The one solid element in the sidebar, so it
+            // is noticed without being loud.
             .when(self.update.is_available(), |d| {
                 d.child(
                     div()
@@ -209,16 +211,12 @@ impl LibraryView {
                         .cursor_pointer()
                         .text_sm()
                         .font_weight(FontWeight::MEDIUM)
-                        .text_color(theme::text())
-                        .hover(|s| s.bg(rgba(0xffffff0f)))
-                        .child(
-                            div()
-                                .size(px(18.))
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .child(div().size(px(8.)).rounded_full().bg(theme::accent())),
-                        )
+                        .bg(theme::text())
+                        .text_color(theme::bg())
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .shadow(theme::card_shadow(0.))
+                        .hover(|s| s.bg(rgba(0xffffffd9)))
+                        .child(icon("icons/download.svg", 18., theme::bg()))
                         .when(collapsed, |d| {
                             d.tooltip(theme::text_tooltip("Update available"))
                         })

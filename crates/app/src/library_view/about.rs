@@ -212,6 +212,20 @@ impl LibraryView {
 
     /// Checks on launch when automatic checks are on and the last one was a day ago.
     pub(super) fn auto_check_for_updates(&mut self, cx: &mut Context<Self>) {
+        // MIRU_PREVIEW_UPDATE=1 shows the update notice without a real release, for checking
+        // its design. Downloading the pretend update fails harmlessly.
+        if std::env::var_os("MIRU_PREVIEW_UPDATE").is_some() {
+            let Version(major, minor, patch) = Version::current();
+            self.update = UpdateState::Available(Release {
+                version: Version(major, minor, patch + 1),
+                notes: "Preview of the update notice.".into(),
+                installer_url: String::new(),
+                installer_name: "preview-setup.exe".into(),
+                size: 0,
+                sha256: None,
+            });
+            return;
+        }
         let due = unix_now() - self.settings.update_checked_at >= updates::CHECK_INTERVAL_SECS;
         if self.settings.auto_update && due && updates::UPDATE_REPO.is_some() {
             self.check_for_updates(cx);
