@@ -109,6 +109,8 @@ impl LibraryView {
                         .font_family(theme::FONT_DISPLAY)
                         .text_size(px(19.))
                         .font_weight(FontWeight::SEMIBOLD)
+                        .gap(px(10.))
+                        .child(icon("icons/enso.svg", 20., theme::text()))
                         .child("miru"),
                 )
                 .child(toggle)

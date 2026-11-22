@@ -27,6 +27,9 @@ sha2 = "0.10"
 souvlaki = "0.9.3"
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_System_ProcessStatus", "Win32_System_Threading"] }
 
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1.34"
+
 [dev-dependencies]
 tempfile.workspace = true
 
@@ -40,9 +43,11 @@ out-dir = "../../dist"
 binaries-dir = "../../target/release"
 binaries = [{ path = "miru", main = true }]
 formats = ["nsis"]
+icons = ["../../assets/brand/miru.ico"]
 # libmpv ships beside the executable; it is not linked statically.
 resources = [{ src = "../../vendor/mpv-dev/libmpv-2.dll", target = "libmpv-2.dll" }]
 
 [package.metadata.packager.nsis]
+installer-icon = "../../assets/brand/miru.ico"
 # Per-user install: no administrator prompt, and updates don't need elevation either.
 installer-mode = "currentUser"
