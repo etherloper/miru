@@ -10,7 +10,7 @@ use std::sync::LazyLock;
 use regex::Regex;
 
 /// Bump when parsing rules change, so the next scan re-parses every file.
-pub const PARSER_VERSION: u32 = 4;
+pub const PARSER_VERSION: u32 = 5;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParsedMedia {
@@ -79,7 +79,10 @@ pub fn parse_path(path: &Path) -> ParsedMedia {
         .filter_map(|p| p.file_name()?.to_str())
         .collect();
 
-    if let Some(episode) = parse_episode(stem, &parents) {
+    if let Some(mut episode) = parse_episode(stem, &parents) {
+        if let ParsedMedia::Episode { show, .. } = &mut episode {
+            *show = canonical_show(show);
+        }
         return episode;
     }
     parse_movie(stem, &parents)
@@ -263,6 +266,22 @@ fn season_of_dir(dir: &str) -> Option<u16> {
 fn show_in_season_dir(dir: &str) -> Option<String> {
     let caps = NAMED_SEASON_DIR.captures(dir)?;
     non_empty(title_and_year(caps.get(1)?.as_str()).0)
+}
+
+/// One spelling for a show whose files name it in slightly different ways, so they group
+/// together: `Bob's Burgers`, `Bob’s Burgers` and `Bobs Burgers` all become `Bobs Burgers`, and
+/// `Law & Order` becomes `Law and Order`. Episodes are grouped by this name (case aside); the
+/// display name normally comes from TMDB.
+fn canonical_show(name: &str) -> String {
+    let without_apostrophes: String = name
+        .chars()
+        .filter(|c| !matches!(c, '\x27' | '’' | '‘' | '`' | '´'))
+        .collect();
+    without_apostrophes
+        .split_whitespace()
+        .map(|word| if word == "&" { "and" } else { word })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Letters and digits only, lowercased: `Yes, Prime Minister` and `Yes Prime Minister` agree.
@@ -532,6 +551,29 @@ mod tests {
             show_year_hint(Path::new("Dead-End Job/Dead.End.Job.2026.S01E01.2160p.mkv")),
             Some(2026)
         );
+    }
+
+    #[test]
+    fn spelling_variants_of_a_show_group_together() {
+        let show_of = |path: &str| match p(path) {
+            ParsedMedia::Episode { show, .. } => show,
+            other => panic!("{path} parsed as {other:?}"),
+        };
+        // Different seasons from different releases of the same show.
+        let names = [
+            r"D:\TV\Bobs Burgers\Season 10\Bobs.Burgers.S10E01.1080p.WEB.h264.mkv",
+            r"D:\TV\Bob's Burgers\Season 14\Bob's Burgers - S14E01 - Fight at the Not Okay Chore-al.mkv",
+            r"D:\TV\Bob’s Burgers (2011)\Season 15\Bob’s Burgers (2011) - S15E03.mkv",
+            r"D:\TV\Bob's Burgers\Season 16\01 - Episode.mkv",
+        ];
+        for name in names {
+            assert_eq!(show_of(name), "Bobs Burgers", "{name}");
+        }
+        assert_eq!(
+            show_of(r"D:\TV\Law & Order\Season 1\Law & Order - S01E01.mkv"),
+            "Law and Order"
+        );
+        assert_eq!(show_of(r"D:\TV\Law.and.Order.S01E02.mkv"), "Law and Order");
     }
 
     #[test]
