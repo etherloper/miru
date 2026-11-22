@@ -1,0 +1,8 @@
+/target
+/vendor/mpv-dev/
+*.dll
+# Local secrets (TMDB key). The template .env.example is committed.
+.env
+.env.*
+!.env.example
+/dist/

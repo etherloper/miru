@@ -1,0 +1,48 @@
+[package]
+name = "miru"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+miru-player = { path = "../player" }
+miru-core = { path = "../core" }
+miru-metadata = { path = "../metadata" }
+directories.workspace = true
+image.workspace = true
+gpui.workspace = true
+gpui-platform.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+raw-window-handle = "0.6"
+notify-debouncer-mini = "0.7"
+async-channel = "2"
+ureq.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10"
+
+[target.'cfg(windows)'.dependencies]
+souvlaki = "0.9.3"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_System_ProcessStatus", "Win32_System_Threading"] }
+
+[dev-dependencies]
+tempfile.workspace = true
+
+# Windows installer: `scripts/package-windows.ps1` (runs cargo-packager with this config).
+[package.metadata.packager]
+product-name = "Miru"
+identifier = "app.miru.player"
+description = "A local media player with a library for your movies and shows"
+category = "Video"
+out-dir = "../../dist"
+binaries-dir = "../../target/release"
+binaries = [{ path = "miru", main = true }]
+formats = ["nsis"]
+# libmpv ships beside the executable; it is not linked statically.
+resources = [{ src = "../../vendor/mpv-dev/libmpv-2.dll", target = "libmpv-2.dll" }]
+
+[package.metadata.packager.nsis]
+# Per-user install: no administrator prompt, and updates don't need elevation either.
+installer-mode = "currentUser"

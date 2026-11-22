@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1480 400" width="1480" height="400">
+  <title>Miru</title>
+  <!-- Icon plus name, for dark backgrounds. The name is set in Segoe UI Variable Display
+       (the app's display face); convert it to outlines before using this outside Windows. -->
+  <defs>
+    <mask id="w-crescent" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+      <circle cx="460" cy="520" r="290" fill="#fff"/>
+      <circle cx="578" cy="468" r="242" fill="#000"/>
+    </mask>
+  </defs>
+  <g transform="translate(40 40) scale(0.3125)">
+    <rect width="1024" height="1024" rx="232" fill="#16122b"/>
+    <!-- Shifted right so the pair sits optically centred on the tile. -->
+    <g transform="translate(46 0)">
+      <rect width="1024" height="1024" fill="#f4f1ff" mask="url(#w-crescent)"/>
+    <path d="M512 382 L512 608 L706 495 Z" fill="#9d8cff" stroke="#9d8cff" stroke-width="58" stroke-linejoin="round"/>
+    </g>
+  </g>
+  <text x="420" y="262" fill="#f4f1ff"
+        font-family="'Segoe UI Variable Display', 'Segoe UI', 'SF Pro Display', Inter, system-ui, sans-serif"
+        font-size="196" font-weight="600" letter-spacing="-4">miru</text>
+</svg>

@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <title>Miru</title>
+  <!-- Two flat shapes on a plain night tile: a crescent moon, and a play button in its hollow. -->
+  <defs>
+    <mask id="crescent" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+      <circle cx="460" cy="520" r="290" fill="#fff"/>
+      <circle cx="578" cy="468" r="242" fill="#000"/>
+    </mask>
+  </defs>
+  <rect width="1024" height="1024" rx="232" fill="#16122b"/>
+  <!-- Shifted right so the pair sits optically centred on the tile. -->
+  <g transform="translate(46 0)">
+    <rect width="1024" height="1024" fill="#f4f1ff" mask="url(#crescent)"/>
+  <path d="M512 382 L512 608 L706 495 Z" fill="#9d8cff" stroke="#9d8cff" stroke-width="58" stroke-linejoin="round"/>
+  </g>
+</svg>

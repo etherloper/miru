@@ -1,0 +1,40 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+
+[workspace.dependencies]
+# gpui-component pins this exact republished gpui build; keep them in lockstep.
+gpui = { package = "gpui-pre", version = "=0.3.12" }
+gpui-platform = { package = "gpui-pre-platform", version = "=0.3.12" }
+libmpv2 = "7.0.1"
+anyhow = "1"
+thiserror = "2"
+rusqlite = { version = "0.43", features = ["bundled"] }
+regex = "1.13"
+walkdir = "2.5"
+tempfile = "3.27"
+ureq = { version = "3.5", features = ["json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+directories = "6"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[profile.dev.package."*"]
+opt-level = 2
+
+# The UI crate too: its render code runs every frame while scrolling or animating, and
+# unoptimised it costs several times the CPU of a release build, which hid real problems.
+[profile.dev.package.miru]
+opt-level = 1
+
+# Vendored with a one-line change (DirectComposition topmost target) so GPUI's UI
+# composites over the mpv child window. See vendor/gpui-pre-windows/MIRU_PATCH.md.
+[patch.crates-io]
+gpui-pre-windows = { path = "vendor/gpui-pre-windows" }

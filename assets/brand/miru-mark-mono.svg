@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="140 200 640 640" width="640" height="640">
+  <title>Miru mark (single colour)</title>
+  <!-- Crescent and play button as one shape, for small sizes, favicons and monochrome use.
+       Fill follows `currentColor` where the SVG is inlined; black otherwise. -->
+  <defs>
+    <mask id="crescent" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+      <circle cx="460" cy="520" r="290" fill="#fff"/>
+      <circle cx="578" cy="468" r="242" fill="#000"/>
+    </mask>
+  </defs>
+  <g fill="currentColor">
+    <rect x="140" y="200" width="640" height="640" mask="url(#crescent)"/>
+    <path d="M512 382 L512 608 L706 495 Z" stroke="currentColor" stroke-width="58" stroke-linejoin="round"/>
+  </g>
+</svg>
