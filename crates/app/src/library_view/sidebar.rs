@@ -8,7 +8,7 @@ impl LibraryView {
     /// Left navigation, kept quiet: the name, four plain rows and Settings at the bottom, on a
     /// flat surface divided from the page by a hairline. Only the selected row gets a faint
     /// fill. Collapses to an icon rail with hover labels (Ctrl+B or the toggle at the top).
-    pub(super) fn render_sidebar(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_sidebar(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let collapsed = self.settings.sidebar_collapsed;
         let item = |id: &'static str,
                     label: &'static str,
@@ -191,7 +191,7 @@ impl LibraryView {
             )
             .child(div().flex_1())
             // A waiting update: the button downloads and installs it in place (see about.rs).
-            .children(self.update_button(collapsed, cx))
+            .children(self.update_button(collapsed, window, cx))
             .child(div().pb_4().child(item(
                 "nav-settings",
                 "Settings",

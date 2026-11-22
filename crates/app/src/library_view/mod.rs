@@ -345,6 +345,8 @@ pub struct LibraryView {
     /// that ends a drag must not open the card under the pointer).
     shelf_drag: Option<ShelfDrag>,
     shelf_drag_ended: Option<Instant>,
+    /// Download fill drawn on the sidebar update button, and when (see `glide_fill`).
+    update_fill: std::cell::Cell<(f32, Instant)>,
     /// Logo image sizes read from file headers, keyed by path.
     image_sizes: std::cell::RefCell<HashMap<String, Option<(u32, u32)>>>,
     /// Scroll positions of the home and detail pages; the nav turns solid once scrolled.
@@ -442,6 +444,7 @@ impl LibraryView {
             shelf_glide: None,
             shelf_drag: None,
             shelf_drag_ended: None,
+            update_fill: std::cell::Cell::new((0., Instant::now())),
             image_sizes: Default::default(),
             home_scroll: ScrollHandle::new(),
             detail_scroll: ScrollHandle::new(),
@@ -1410,7 +1413,7 @@ impl Render for LibraryView {
             .bg(theme::bg())
             .text_color(theme::text())
             .flex()
-            .child(self.render_sidebar(cx))
+            .child(self.render_sidebar(window, cx))
             .child(
                 div()
                     .relative()

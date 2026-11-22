@@ -15,8 +15,12 @@ use anyhow::{Context as _, Result, bail};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
-/// Repository whose releases this build follows, if any.
-pub const UPDATE_REPO: Option<&str> = option_env!("MIRU_UPDATE_REPO");
+/// Repository whose releases this build follows: `MIRU_UPDATE_REPO` when the build ran (a fork
+/// sets its own), otherwise Miru's own repository, so every build can check for updates.
+pub const UPDATE_REPO: Option<&str> = match option_env!("MIRU_UPDATE_REPO") {
+    Some(repo) => Some(repo),
+    None => Some("etherloper/miru"),
+};
 /// Automatic checks run at most this often.
 pub const CHECK_INTERVAL_SECS: i64 = 24 * 60 * 60;
 

@@ -36,6 +36,19 @@ fn preview_mode() -> bool {
     std::env::var_os("MIRU_PREVIEW_UPDATE").is_some()
 }
 
+/// The pretend update offered in preview mode: the next patch version.
+fn preview_release() -> UpdateState {
+    let Version(major, minor, patch) = Version::current();
+    UpdateState::Available(Release {
+        version: Version(major, minor, patch + 1),
+        notes: "Preview of the update notice.".into(),
+        installer_url: String::new(),
+        installer_name: "preview-setup.exe".into(),
+        size: 0,
+        sha256: None,
+    })
+}
+
 impl LibraryView {
     // ---- TMDB key -----------------------------------------------------------------------
 
@@ -214,18 +227,8 @@ impl LibraryView {
 
     /// Checks on launch when automatic checks are on and the last one was a day ago.
     pub(super) fn auto_check_for_updates(&mut self, cx: &mut Context<Self>) {
-        // MIRU_PREVIEW_UPDATE=1 shows the update notice without a real release, for checking
-        // its design. Downloading the pretend update fails harmlessly.
         if preview_mode() {
-            let Version(major, minor, patch) = Version::current();
-            self.update = UpdateState::Available(Release {
-                version: Version(major, minor, patch + 1),
-                notes: "Preview of the update notice.".into(),
-                installer_url: String::new(),
-                installer_name: "preview-setup.exe".into(),
-                size: 0,
-                sha256: None,
-            });
+            self.update = preview_release();
             return;
         }
         let due = unix_now() - self.settings.update_checked_at >= updates::CHECK_INTERVAL_SECS;
@@ -246,6 +249,21 @@ impl LibraryView {
         }
         self.update = UpdateState::Checking;
         cx.notify();
+        if preview_mode() {
+            // Pretend to check, then offer the pretend update again.
+            cx.spawn(async move |this, cx| {
+                cx.background_executor()
+                    .timer(Duration::from_millis(900))
+                    .await;
+                this.update(cx, |view, cx| {
+                    view.update = preview_release();
+                    cx.notify();
+                })
+                .ok();
+            })
+            .detach();
+            return;
+        }
         cx.spawn(async move |this, cx| {
             let found = cx
                 .background_executor()
@@ -403,15 +421,9 @@ impl LibraryView {
         }
         let current = Version::current();
         let (description, control): (String, Option<AnyElement>) = match &self.update {
-            UpdateState::Idle => (
-                format!("You have version {current}."),
-                Some(self.check_button(cx)),
-            ),
+            UpdateState::Idle => (format!("You have version {current}."), None),
             UpdateState::Checking => ("Checking for updates…".into(), None),
-            UpdateState::UpToDate => (
-                format!("Version {current} is the latest."),
-                Some(self.check_button(cx)),
-            ),
+            UpdateState::UpToDate => (format!("Version {current} is the latest."), None),
             UpdateState::Available(release) => (
                 format!(
                     "Version {} is available (you have {current}).{}",
@@ -456,7 +468,7 @@ impl LibraryView {
                     .into_any_element(),
                 ),
             ),
-            UpdateState::Failed(message) => (message.to_string(), Some(self.check_button(cx))),
+            UpdateState::Failed(message) => (message.to_string(), None),
             UpdateState::DownloadFailed { message, .. } => (
                 message.to_string(),
                 Some(
@@ -470,6 +482,19 @@ impl LibraryView {
                 ),
             ),
         };
+        // The refresh button sits beside whatever the row offers, except mid-check or download.
+        let can_check = !matches!(
+            self.update,
+            UpdateState::Checking | UpdateState::Downloading { .. }
+        );
+        let control = div()
+            .flex()
+            .items_center()
+            .gap_3()
+            .children(control)
+            .when(can_check, |d| d.child(self.check_button(cx)))
+            .into_any_element();
+        let control = Some(control);
         let auto = toggle(
             "update-auto",
             self.settings.auto_update,
@@ -486,13 +511,15 @@ impl LibraryView {
         ]
     }
 
+    /// Round refresh button that checks for a newer version.
     fn check_button(&self, cx: &mut Context<Self>) -> AnyElement {
-        small_button(
+        round_button(
             "update-check",
-            "Check now",
-            false,
+            "icons/restart.svg",
+            34.,
             cx.listener(|this, _, _, cx| this.check_for_updates(cx)),
         )
+        .tooltip(theme::text_tooltip("Check for updates"))
         .into_any_element()
     }
 }
@@ -533,6 +560,7 @@ impl LibraryView {
     pub(super) fn update_button(
         &self,
         collapsed: bool,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         const RADIUS: f32 = 8.;
@@ -574,6 +602,7 @@ impl LibraryView {
         };
         // While downloading, a dimmed base with a white fill growing from the left; otherwise
         // solid white. The fill rounds its own corners (children aren't clipped to rounding).
+        let progress = progress.map(|target| self.glide_fill(target, window));
         let fill = progress.map(|p| {
             div()
                 .absolute()
@@ -638,6 +667,28 @@ impl LibraryView {
         Some(button.into_any_element())
     }
 }
+
+impl LibraryView {
+    /// Download progress as drawn: it eases toward the real value every frame, so the fill
+    /// glides instead of jumping each time a chunk arrives.
+    fn glide_fill(&self, target: f32, window: &mut Window) -> f32 {
+        let (shown, at) = self.update_fill.get();
+        let dt = at.elapsed().as_secs_f32().min(0.1);
+        let next = if target < shown {
+            target // a new download starting over
+        } else {
+            shown + (target - shown) * (1. - (-dt / FILL_EASE_SECS).exp())
+        };
+        self.update_fill.set((next, Instant::now()));
+        if (target - next).abs() > 0.001 {
+            window.request_animation_frame();
+        }
+        next
+    }
+}
+
+/// Time constant of the download fill's easing (seconds).
+const FILL_EASE_SECS: f32 = 0.15;
 
 #[derive(Clone, Copy)]
 enum UpdateAction {
