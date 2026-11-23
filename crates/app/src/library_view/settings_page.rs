@@ -334,6 +334,7 @@ impl LibraryView {
         ];
         let sidebar_rows = self.sidebar_order_rows(cx);
         let history_rows = self.history_rows(cx);
+        let backup_rows = self.backup_rows(cx);
         let metadata_rows = self.metadata_rows(window, cx);
         let about_rows = self.about_rows(cx);
         folders.push(library_actions.into_any_element());
@@ -391,6 +392,7 @@ impl LibraryView {
                                 "Removing an item clears its resume point and watched mark. Files are not deleted.",
                                 history_rows,
                             ))
+                            .child(section("Backup", "", backup_rows))
                             .child(section(
                                 "Keyboard shortcuts",
                                 "Alt+← and the mouse back button work anywhere in the library.",

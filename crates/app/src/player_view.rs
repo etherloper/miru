@@ -1086,6 +1086,48 @@ impl PlayerView {
         ))
     }
 
+    /// "Skip Intro" / "Skip Recap" while playing a chapter named like one: jumps to where it
+    /// ends. Shown in the Up next card's place (the two never overlap in time).
+    fn render_skip(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+        let index = self.current_chapter?;
+        let (kind, end) = crate::up_next::skippable(&self.chapters, index, self.state.duration)?;
+        // Gone for the last moment of the chapter, so it doesn't flash as the next begins.
+        if self.state.position >= end - 1.5 {
+            return None;
+        }
+        let button = div()
+            .id("skip-chapter")
+            .tab_index(0)
+            .focus_visible(theme::focus_ring)
+            .occlude()
+            .absolute()
+            .right(px(EDGE))
+            .bottom(px(150.))
+            .h(px(48.))
+            .px_6()
+            .flex()
+            .items_center()
+            .gap_2()
+            .rounded(px(10.))
+            .bg(rgba(0x0000008c))
+            .border_1()
+            .border_color(rgba(0xffffff40))
+            .shadow(theme::card_shadow(0.6))
+            .cursor_pointer()
+            .text_color(theme::text())
+            .font_weight(FontWeight::SEMIBOLD)
+            .hover(|s| s.bg(theme::text()).text_color(theme::bg()))
+            .child(kind.label())
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.run(|p| p.seek_absolute(end), cx);
+            }));
+        Some(button.with_animation(
+            ("skip-in", index),
+            Animation::new(theme::motion(280)).with_easing(gpui::ease_out_quint()),
+            |el, t| el.opacity(t).bottom(px(134. + 16. * t)),
+        ))
+    }
+
     /// Volume control matching the round glass buttons beside it. At rest it is just the
     /// speaker (mute) button; hovering it, or dragging its slider, widens it smoothly to show a
     /// slider (click or drag) and the level as a number.
@@ -1722,6 +1764,8 @@ impl Render for PlayerView {
         }
         if let Some(card) = self.render_up_next(window, cx) {
             root = root.child(card);
+        } else if let Some(skip) = self.render_skip(cx) {
+            root = root.child(skip);
         }
         if let Some(error) = &self.error {
             root = root.child(

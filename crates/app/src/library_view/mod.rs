@@ -31,6 +31,7 @@ use crate::player_view::PlaybackRequest;
 use crate::theme::{self, glass_button, icon, primary_button, round_button};
 
 mod about;
+mod backup;
 mod cards;
 mod cast;
 mod collections;
@@ -340,6 +341,8 @@ pub struct LibraryView {
     /// Sidebar-order rows' eased offsets while reordering.
     nav_shift: Vec<f32>,
     nav_frame: Instant,
+    /// The outcome of the last backup or restore, shown under the Backup rows.
+    backup_status: Option<(SharedString, bool)>,
     /// The collapsed-sidebar icon whose label is popped out (see `side_tip`).
     side_tip_key: Option<SharedString>,
     /// Bumped on every hover change, so a delayed label only appears if still hovered.
@@ -487,6 +490,7 @@ impl LibraryView {
             nav_drag: None,
             nav_shift: Vec::new(),
             nav_frame: Instant::now(),
+            backup_status: None,
             side_tip_key: None,
             side_tip_epoch: 0,
             side_tip_left: None,

@@ -2992,6 +2992,7 @@ version = "0.1.9"
 dependencies = [
  "regex",
  "rusqlite",
+ "serde",
  "tempfile",
  "thiserror 2.0.21",
  "tracing",

@@ -1,4 +1,5 @@
-//! When the "Up next" card appears: as the credits start, rather than after the file ends.
+//! When the "Up next" card appears (as the credits start, rather than after the file ends),
+//! and which chapters get a "Skip Intro" / "Skip Recap" button.
 
 use miru_player::Chapter;
 
@@ -30,9 +31,81 @@ pub fn credits_start(duration: f64, chapters: &[Chapter]) -> Option<f64> {
     Some(named_credits.map_or(duration - FALLBACK_LEAD, |c| c.time))
 }
 
+/// What a skip button skips.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Skip {
+    Intro,
+    Recap,
+}
+
+impl Skip {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Intro => "Skip Intro",
+            Self::Recap => "Skip Recap",
+        }
+    }
+}
+
+/// Skippable chapters are short and early: an intro longer than this, or starting later than
+/// this share of the file, is more likely a mislabelled chapter.
+const SKIP_MAX_LEN: f64 = 5. * 60.;
+const SKIP_LATEST: f64 = 0.4;
+
+/// Whether chapter `index` is an intro or recap, and where it ends (the next chapter's start,
+/// else the end of the file).
+pub fn skippable(chapters: &[Chapter], index: usize, duration: f64) -> Option<(Skip, f64)> {
+    let chapter = chapters.get(index)?;
+    let title = chapter.title.as_deref()?.to_lowercase();
+    let words: Vec<&str> = title
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .collect();
+    let has = |w: &str| words.iter().any(|word| word.starts_with(w));
+    let kind = if has("recap") || has("previously") || title.contains("last time") {
+        Skip::Recap
+    } else if has("intro")
+        || has("opening")
+        || words.contains(&"op")
+        || title.contains("title sequence")
+        || title.contains("main title")
+        || title.contains("theme song")
+    {
+        Skip::Intro
+    } else {
+        return None;
+    };
+    let end = chapters.get(index + 1).map_or(duration, |next| next.time);
+    let fits = duration > 0.
+        && chapter.time <= duration * SKIP_LATEST
+        && end - chapter.time <= SKIP_MAX_LEN
+        && end > chapter.time;
+    fits.then_some((kind, end))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn finds_intros_and_recaps() {
+        let chapters = [
+            chapter("Previously On", 0.),
+            chapter("Opening Credits", 45.),
+            chapter("Part 1", 130.),
+            chapter("Intro to the finale", 2000.),
+        ];
+        assert_eq!(skippable(&chapters, 0, 2700.), Some((Skip::Recap, 45.)));
+        assert_eq!(skippable(&chapters, 1, 2700.), Some((Skip::Intro, 130.)));
+        assert_eq!(skippable(&chapters, 2, 2700.), None);
+        // Late in the file: not an intro, whatever it's called.
+        assert_eq!(skippable(&chapters, 3, 2700.), None);
+        // "Opera" isn't "op"; "Scope" doesn't start with it.
+        assert_eq!(
+            skippable(&[chapter("Opera", 0.), chapter("Scope", 60.)], 0, 2700.),
+            None
+        );
+    }
 
     fn chapter(title: &str, time: f64) -> Chapter {
         Chapter {
