@@ -838,20 +838,45 @@ impl LibraryView {
 const UPDATE_GROUP: &str = "update-control";
 
 fn update_badge(size: f32, progress: Option<f32>, ready: bool, failed: bool) -> impl IntoElement {
-    let group = UPDATE_GROUP;
-    let (fill, ink, path) = if ready {
-        (theme::text(), theme::bg(), "icons/restart.svg")
-    } else if failed {
-        (rgba(0xffffff14), theme::text(), "icons/refresh.svg")
+    let icon_size = size * 0.5;
+    // Ready: a white disc with a dark restart arrow, the one thing left to press.
+    if ready {
+        return div()
+            .size(px(size))
+            .flex_shrink_0()
+            .rounded_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(theme::text())
+            .group_hover(UPDATE_GROUP, |s| s.bg(rgba(0xffffffff)))
+            .child(icon("icons/restart.svg", size * 0.45, theme::bg()))
+            .into_any_element();
+    }
+    // Otherwise just the icon, no background: it brightens on hover, and a dot sits on its
+    // corner until the download starts.
+    let path = if failed {
+        "icons/refresh.svg"
     } else {
-        (rgba(0xffffff14), theme::text(), "icons/download.svg")
+        "icons/download.svg"
     };
-    let dot = (progress.is_none() && !ready).then(|| {
+    let glyph = svg()
+        .path(path)
+        .size(px(icon_size))
+        .text_color(if progress.is_some() {
+            theme::text_secondary()
+        } else {
+            rgba(0xd8d8deff)
+        })
+        .when(progress.is_none(), |s| {
+            s.group_hover(UPDATE_GROUP, |s| s.text_color(theme::text()))
+        });
+    let dot = progress.is_none().then(|| {
         div()
             .absolute()
-            .top(px(-1.))
-            .right(px(-1.))
-            .size(px(10.))
+            .top(px(-3.))
+            .right(px(-4.))
+            .size(px(9.))
             .rounded_full()
             .border_2()
             .border_color(theme::bg())
@@ -882,35 +907,18 @@ fn update_badge(size: f32, progress: Option<f32>, ready: bool, failed: bool) -> 
         .relative()
         .size(px(size))
         .flex_shrink_0()
-        .rounded_full()
         .flex()
         .items_center()
         .justify_center()
-        .bg(if progress.is_some() {
-            rgba(0x00000000)
-        } else {
-            fill
-        })
-        .when(progress.is_none(), |d| {
-            d.group_hover(group, |s| {
-                if ready {
-                    s.bg(rgba(0xffffffff))
-                } else {
-                    s.bg(rgba(0xffffff29))
-                }
-            })
-        })
         .children(ring)
-        .child(icon(
-            path,
-            size * 0.45,
-            if progress.is_some() {
-                theme::text_secondary()
-            } else {
-                ink
-            },
-        ))
-        .children(dot)
+        .child(
+            div()
+                .relative()
+                .size(px(icon_size))
+                .child(glyph)
+                .children(dot),
+        )
+        .into_any_element()
 }
 
 /// A clockwise arc from the top of a circle, covering `fraction` of it, as a stroked path.
