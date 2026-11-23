@@ -221,15 +221,18 @@ impl LibraryView {
                         .child(icon("icons/sidebar.svg", 18., theme::text_secondary())),
                 )
             })
-            .when(!collapsed, |d| {
-                d.tooltip(theme::text_tooltip("Collapse sidebar  Ctrl+B"))
-            })
             .on_click(cx.listener(|this, _, _, cx| this.toggle_sidebar(cx)));
+        // The pop-out label in both states: a GPUI tooltip would linger after the click, as
+        // the button moves out from under the pointer.
         let toggle = self.side_tip(
-            collapsed,
+            true,
             toggle,
             "sidebar-toggle",
-            "Expand sidebar  Ctrl+B",
+            if collapsed {
+                "Expand sidebar  Ctrl+B"
+            } else {
+                "Collapse sidebar  Ctrl+B"
+            },
             cx,
         );
 

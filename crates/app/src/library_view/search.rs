@@ -413,7 +413,7 @@ impl LibraryView {
             .h(px(40.))
             .px_5()
             .border_t_1()
-            .border_color(rgba(0xffffff0d))
+            .border_color(rgba(0xffffff1f))
             .flex()
             .items_center()
             .gap_5()
@@ -435,14 +435,15 @@ impl LibraryView {
             .w(px(640.))
             .rounded(px(16.))
             .overflow_hidden()
-            .bg(theme::panel())
+            // True black with a light outline, like the Settings cards.
+            .bg(rgba(0x000000ff))
             .border_1()
-            .border_color(theme::glass_border())
+            .border_color(rgba(0xffffff38))
             .shadow(theme::frost_shadow())
             .flex()
             .flex_col()
             .child(field)
-            .children(results.map(|r| div().border_t_1().border_color(rgba(0xffffff0d)).child(r)))
+            .children(results.map(|r| div().border_t_1().border_color(rgba(0xffffff1f)).child(r)))
             .child(footer);
 
         div()

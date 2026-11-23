@@ -1089,6 +1089,10 @@ impl LibraryView {
     }
 
     fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
+        // Drop any popped-out label: its icon moves (or goes) as the sidebar changes width.
+        self.side_tip_key = None;
+        self.side_tip_left = None;
+        self.side_tip_epoch += 1;
         self.update_settings(|s| s.sidebar_collapsed = !s.sidebar_collapsed, cx);
         self.sidebar_epoch += 1;
         self.sidebar_changed_at = Instant::now();
