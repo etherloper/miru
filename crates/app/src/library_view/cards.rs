@@ -173,7 +173,7 @@ impl LibraryView {
             slot,
             |c| matches!(c, CardContent::Continue(existing) if existing == card),
             || CardContent::Continue(card.clone()),
-            |_| (CONTINUE_W, CONTINUE_W * 9. / 16.),
+            |_| (CONTINUE_W, CONTINUE_W * 9. / 16. + CARD_GAP + CAPTION_H),
             cx,
         )
     }
@@ -446,41 +446,60 @@ impl Card {
             .overflow_hidden()
             .bg(theme::placeholder(&card.title, card.accent))
             .child(self.art(card.art.clone(), theme::RADIUS_CARD, ART_CARD))
-            .child(div().absolute().inset_0().bg(linear_gradient(
-                0.,
-                linear_color_stop(rgba(0x000000d9), 0.),
-                linear_color_stop(rgba(0x00000000), 0.6),
-            )))
+            // Just the progress on the artwork, over a light shade so it reads on bright art.
+            .when(card.fraction > 0., |d| {
+                d.child(div().absolute().inset_0().bg(linear_gradient(
+                    0.,
+                    linear_color_stop(rgba(0x00000099), 0.),
+                    linear_color_stop(rgba(0x00000000), 0.3),
+                )))
+                .child(
+                    div()
+                        .absolute()
+                        .left_4()
+                        .right_4()
+                        .bottom_3()
+                        .child(theme::progress_bar(card.fraction, 3.)),
+                )
+            });
+        // The title and episode underneath, like the posters' captions.
+        div()
+            .w(px(CONTINUE_W))
+            .flex()
+            .flex_col()
+            .gap(px(CARD_GAP))
             .child(
                 div()
-                    .absolute()
-                    .left_4()
-                    .right_4()
-                    .bottom_3()
+                    .w(px(CONTINUE_W))
+                    .h(px(height))
+                    .child(self.lift(art, CONTINUE_W, height)),
+            )
+            .child(
+                div()
+                    .h(px(CAPTION_H))
                     .flex()
                     .flex_col()
-                    .gap_1()
+                    .gap_0p5()
                     .child(
                         div()
-                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_sm()
+                            .font_weight(FontWeight::MEDIUM)
                             .truncate()
+                            .text_color(if self.hovered {
+                                theme::text()
+                            } else {
+                                rgba(0xe8e8edff)
+                            })
                             .child(card.title.clone()),
                     )
                     .child(
                         div()
                             .text_xs()
-                            .text_color(rgba(0xffffffb3))
+                            .text_color(theme::text_tertiary())
                             .truncate()
                             .child(card.subtitle.clone()),
-                    )
-                    .when(card.fraction > 0., |d| {
-                        d.child(div().mt_1().child(theme::progress_bar(card.fraction, 3.)))
-                    }),
-            );
-        div()
-            .w(px(CONTINUE_W))
-            .h(px(height))
-            .child(self.lift(art, CONTINUE_W, height))
+                    ),
+            )
     }
 
     fn episode_body(
