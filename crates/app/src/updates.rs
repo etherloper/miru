@@ -180,40 +180,22 @@ pub fn download(release: &Release, dir: &Path, progress: impl Fn(f32)) -> Result
     Ok(target)
 }
 
-/// Runs the installer silently once the app has quit, then starts the new version. The caller
-/// quits straight after this returns.
+/// Opens the installer as a normal, visible window; the caller quits straight after, so
+/// Miru is closed by the time the installer copies files, and the installer offers to start
+/// the new version when it finishes.
+///
+/// Deliberately not silent and not through a script: an app that downloads a program and runs
+/// it invisibly is what malware does, and antivirus heuristics treat it that way.
 #[cfg(windows)]
-pub fn install_and_restart(installer: &Path) -> Result<()> {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-
-    let app = std::env::current_exe().context("finding the running app")?;
-    // PowerShell single-quoted strings: double any single quote in the paths.
-    let quote = |p: &Path| format!("'{}'", p.display().to_string().replace('\'', "''"));
-    let script = format!(
-        "Start-Sleep -Seconds 2; \
-         Start-Process -Wait -FilePath {installer} -ArgumentList '/S'; \
-         Start-Process -FilePath {app}",
-        installer = quote(installer),
-        app = quote(&app),
-    );
-    std::process::Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-WindowStyle",
-            "Hidden",
-            "-Command",
-        ])
-        .arg(script)
-        .creation_flags(CREATE_NO_WINDOW)
+pub fn open_installer(installer: &Path) -> Result<()> {
+    std::process::Command::new(installer)
         .spawn()
         .context("starting the installer")?;
     Ok(())
 }
 
 #[cfg(not(windows))]
-pub fn install_and_restart(_: &Path) -> Result<()> {
+pub fn open_installer(_: &Path) -> Result<()> {
     bail!("installing updates is only supported on Windows for now")
 }
 

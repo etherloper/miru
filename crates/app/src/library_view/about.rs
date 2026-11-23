@@ -18,7 +18,7 @@ pub(super) enum UpdateState {
         release: Release,
         progress: f32,
     },
-    /// Downloaded and verified; installing restarts the app.
+    /// Downloaded and verified; installing closes Miru and opens the installer.
     Ready {
         release: Release,
         installer: PathBuf,
@@ -345,7 +345,7 @@ impl LibraryView {
                 "this is only a preview, so there is nothing to install"
             ))
         } else {
-            updates::install_and_restart(installer)
+            updates::open_installer(installer)
         };
         match started {
             Ok(()) => cx.quit(),
@@ -473,7 +473,7 @@ impl LibraryView {
     }
 
     /// The update status with whatever it offers: a refresh or download icon, a progress bar
-    /// while downloading, or "Install and restart".
+    /// while downloading, or "Install update".
     fn update_status_row(&self, cx: &mut Context<Self>) -> AnyElement {
         if updates::UPDATE_REPO.is_none() {
             return compact_row("Updates", "This build doesn't check for updates.", None)
@@ -506,12 +506,12 @@ impl LibraryView {
             ),
             UpdateState::Ready { release, .. } => (
                 format!("Version {} is ready", release.version),
-                "Miru will close, update and reopen.".into(),
+                "Miru will close and the installer will open.".into(),
                 Some(
                     primary_button(
                         "update-install",
                         None,
-                        "Install and restart",
+                        "Install update",
                         cx.listener(|this, _, _, cx| this.install_update(cx)),
                     )
                     .into_any_element(),
@@ -746,7 +746,7 @@ impl LibraryView {
                 None,
             ),
             UpdateState::Ready { release, .. } => (
-                "Restart to update".into(),
+                "Install update".into(),
                 format!("Version {} is ready", release.version),
                 Some(UpdateAction::Install),
             ),
