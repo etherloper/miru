@@ -21,8 +21,6 @@ pub const UPDATE_REPO: Option<&str> = match option_env!("MIRU_UPDATE_REPO") {
     Some(repo) => Some(repo),
     None => Some("etherloper/miru"),
 };
-/// Automatic checks run at most this often.
-pub const CHECK_INTERVAL_SECS: i64 = 24 * 60 * 60;
 
 /// A newer version, ready to download.
 #[derive(Debug, Clone, PartialEq)]

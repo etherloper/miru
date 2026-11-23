@@ -475,8 +475,8 @@ impl LibraryView {
             .child(art_layer(backdrop, 0., ART_BACKDROP))
             .child(div().absolute().inset_0().bg(linear_gradient(
                 90.,
-                linear_color_stop(rgba(0x08080bf2), 0.),
-                linear_color_stop(rgba(0x08080b00), 0.7),
+                linear_color_stop(rgba(0x000000f2), 0.),
+                linear_color_stop(rgba(0x00000000), 0.7),
             )))
             // Bottom fade into the page, eased: GPUI gradients have two stops, so a short solid
             // fade and a long soft one are layered, which avoids the hard line a single linear
@@ -484,12 +484,12 @@ impl LibraryView {
             .child(div().absolute().inset_0().bg(linear_gradient(
                 0.,
                 linear_color_stop(theme::bg(), 0.),
-                linear_color_stop(rgba(0x08080b00), 0.28),
+                linear_color_stop(rgba(0x00000000), 0.28),
             )))
             .child(div().absolute().inset_0().bg(linear_gradient(
                 0.,
-                linear_color_stop(rgba(0x08080bb3), 0.),
-                linear_color_stop(rgba(0x08080b00), 0.62),
+                linear_color_stop(rgba(0x000000b3), 0.),
+                linear_color_stop(rgba(0x00000000), 0.62),
             )))
             .children(poster)
             .child(

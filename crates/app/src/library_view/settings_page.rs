@@ -401,13 +401,6 @@ impl LibraryView {
             )
     }
 
-    pub(super) fn remove_from_history(&mut self, file_id: i64, cx: &mut Context<Self>) {
-        if let Err(e) = self.db.remove_from_history(file_id) {
-            self.show_error(format!("Could not update watch history: {e}"), cx);
-        }
-        self.refresh(cx);
-    }
-
     pub(super) fn clear_history(&mut self, cx: &mut Context<Self>) {
         self.confirm_clear_history = false;
         if let Err(e) = self.db.clear_history() {
@@ -416,7 +409,8 @@ impl LibraryView {
         self.refresh(cx);
     }
 
-    /// Rows for the Watch History section: one per file, newest first, plus a clear-all footer.
+    /// Watch History, one row per title: a show's episodes collapse into one row showing the
+    /// latest. The most recent few show at first; the rest are a click away.
     pub(super) fn history_rows(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let mut rows: Vec<AnyElement> = Vec::new();
         if self.history.is_empty() {
@@ -430,29 +424,67 @@ impl LibraryView {
             );
             return rows;
         }
-        for (file, progress) in &self.history {
-            let title = match &file.media {
-                ParsedMedia::Movie { title, year } => {
-                    let display = self
-                        .movies
-                        .iter()
-                        .find(|m| m.key.title.eq_ignore_ascii_case(title) && m.key.year == *year)
-                        .map_or(title.clone(), |m| m.display_title().to_string());
-                    match year {
-                        Some(y) => format!("{display} ({y})"),
-                        None => display,
-                    }
-                }
-                ParsedMedia::Episode { show, .. } => {
-                    let display = self
-                        .shows
-                        .iter()
-                        .find(|s| s.key.title.eq_ignore_ascii_case(show))
-                        .map_or(show.clone(), |s| s.display_title().to_string());
-                    format!("{display} · {}", episode_label(&file.media))
-                }
+
+        // Group by title, keeping the order of each title's most recent play.
+        struct Group<'a> {
+            item: Option<LibraryItem>,
+            title: String,
+            latest: &'a (MediaFile, Progress, i64),
+            file_ids: Vec<i64>,
+        }
+        let mut groups: Vec<Group> = Vec::new();
+        let mut index: HashMap<(bool, String, Option<u16>), usize> = HashMap::new();
+        for entry in &self.history {
+            let (file, _, _) = entry;
+            let key = match &file.media {
+                ParsedMedia::Movie { title, year } => (false, title.to_lowercase(), *year),
+                ParsedMedia::Episode { show, .. } => (true, show.to_lowercase(), None),
             };
-            let status = if progress.watched {
+            if let Some(&ix) = index.get(&key) {
+                groups[ix].file_ids.push(file.id);
+                continue;
+            }
+            let item = match &file.media {
+                ParsedMedia::Movie { title, year } => self
+                    .movies
+                    .iter()
+                    .find(|m| m.key.title.eq_ignore_ascii_case(title) && m.key.year == *year),
+                ParsedMedia::Episode { show, .. } => self
+                    .shows
+                    .iter()
+                    .find(|s| s.key.title.eq_ignore_ascii_case(show)),
+            }
+            .cloned();
+            let title = match (&item, &file.media) {
+                (Some(item), _) => item.display_title().to_string(),
+                (None, ParsedMedia::Movie { title, .. }) => title.clone(),
+                (None, ParsedMedia::Episode { show, .. }) => show.clone(),
+            };
+            index.insert(key, groups.len());
+            groups.push(Group {
+                item,
+                title,
+                latest: entry,
+                file_ids: vec![file.id],
+            });
+        }
+
+        let total = groups.len();
+        let shown = if self.history_expanded {
+            total
+        } else {
+            total.min(HISTORY_PREVIEW)
+        };
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis() as i64);
+        for (ix, group) in groups.into_iter().take(shown).enumerate() {
+            let (file, progress, at) = group.latest;
+            let mut details: Vec<String> = Vec::new();
+            if let ParsedMedia::Episode { .. } = file.media {
+                details.push(short_episode(&file.media));
+            }
+            details.push(if progress.watched {
                 "Watched".to_string()
             } else {
                 format!(
@@ -460,17 +492,50 @@ impl LibraryView {
                     (progress.fraction() * 100.).round() as u32,
                     remaining(progress)
                 )
-            };
-            let file_id = file.id;
+            });
+            details.push(played_ago(now_ms - at));
+            let episodes = group.file_ids.len();
+            if matches!(file.media, ParsedMedia::Episode { .. }) && episodes > 1 {
+                details.push(format!("{episodes} episodes"));
+            }
+            let meta = group.item.as_ref().and_then(|i| i.metadata.as_ref());
+            let thumb = div()
+                .relative()
+                .w(px(36.))
+                .h(px(54.))
+                .flex_shrink_0()
+                .rounded(px(5.))
+                .overflow_hidden()
+                .bg(theme::placeholder(
+                    &group.title,
+                    meta.and_then(|m| m.accent_rgb),
+                ))
+                .child(art_layer(
+                    meta.and_then(|m| m.poster_file.clone()),
+                    5.,
+                    ART_THUMB,
+                ));
+            let ids = group.file_ids.clone();
+            let key = group.item.as_ref().map(|i| i.key.clone());
             rows.push(
                 div()
+                    .id(("history-row", ix))
                     .flex()
                     .items_center()
                     .gap_4()
                     .px_5()
-                    .py_3()
+                    .py_2p5()
                     .border_b_1()
                     .border_color(theme::glass_border())
+                    .when(key.is_some(), |d| {
+                        d.cursor_pointer().hover(|s| s.bg(rgba(0xffffff08)))
+                    })
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if let Some(key) = &key {
+                            this.open_key(key, cx);
+                        }
+                    }))
+                    .child(thumb)
                     .child(
                         div()
                             .flex_1()
@@ -482,24 +547,62 @@ impl LibraryView {
                                 div()
                                     .font_weight(FontWeight::MEDIUM)
                                     .truncate()
-                                    .child(title),
+                                    .child(group.title.clone()),
                             )
                             .child(
                                 div()
                                     .text_sm()
                                     .text_color(theme::text_secondary())
-                                    .child(status),
+                                    .truncate()
+                                    .child(details.join("  ·  ")),
                             ),
                     )
-                    .child(small_button(
-                        ("history-remove", file_id as usize),
-                        "Remove",
-                        false,
-                        cx.listener(move |this, _, _, cx| this.remove_from_history(file_id, cx)),
-                    ))
+                    .child(
+                        theme::icon_button(
+                            ("history-remove", ix),
+                            "icons/trash.svg",
+                            34.,
+                            true,
+                            cx.listener(move |this, _, _, cx| {
+                                cx.stop_propagation();
+                                this.remove_titles_from_history(&ids, cx);
+                            }),
+                        )
+                        .tooltip(theme::text_tooltip("Remove from history")),
+                    )
                     .into_any_element(),
             );
         }
+        if total > HISTORY_PREVIEW {
+            let expanded = self.history_expanded;
+            rows.push(
+                div()
+                    .id("history-more")
+                    .h(px(44.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .gap_2()
+                    .border_b_1()
+                    .border_color(theme::glass_border())
+                    .text_sm()
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme::text_secondary())
+                    .cursor_pointer()
+                    .hover(|s| s.text_color(theme::text()))
+                    .child(if expanded {
+                        "Show fewer".to_string()
+                    } else {
+                        format!("Show all {total} titles")
+                    })
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.history_expanded ^= true;
+                        cx.notify();
+                    }))
+                    .into_any_element(),
+            );
+        }
+
         let footer: AnyElement = if self.confirm_clear_history {
             div()
                 .flex()
@@ -548,21 +651,30 @@ impl LibraryView {
                 .gap_4()
                 .px_5()
                 .py_4()
-                .child(div().text_sm().text_color(theme::text_tertiary()).child(
-                    if self.history.len() as u32 >= HISTORY_LIMIT {
-                        format!("Showing the latest {HISTORY_LIMIT}")
-                    } else {
-                        format!(
-                            "{} item{}",
-                            self.history.len(),
-                            if self.history.len() == 1 { "" } else { "s" }
-                        )
-                    },
-                ))
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(theme::text_tertiary())
+                        .child(if total == 1 {
+                            "1 title".to_string()
+                        } else {
+                            format!("{total} titles")
+                        }),
+                )
                 .child(footer)
                 .into_any_element(),
         );
         rows
+    }
+
+    fn remove_titles_from_history(&mut self, file_ids: &[i64], cx: &mut Context<Self>) {
+        for id in file_ids {
+            if let Err(e) = self.db.remove_from_history(*id) {
+                self.show_error(format!("Could not update watch history: {e}"), cx);
+                break;
+            }
+        }
+        self.refresh(cx);
     }
 
     pub(super) fn folder_row(&self, stats: &RootStats, cx: &mut Context<Self>) -> AnyElement {
@@ -1000,4 +1112,36 @@ pub(super) fn shortcut_rows() -> Vec<AnyElement> {
     }
     rows.push(div().h(px(12.)).into_any_element());
     rows
+}
+
+/// "Today", "Yesterday", "3 days ago"… from milliseconds since a title was played.
+fn played_ago(ms: i64) -> String {
+    let minutes = ms.max(0) / 60_000;
+    match minutes {
+        0..1 => "Just now".into(),
+        1..60 => format!("{minutes} min ago"),
+        60..1440 => {
+            let hours = minutes / 60;
+            if hours == 1 {
+                "1 hour ago".into()
+            } else {
+                format!("{hours} hours ago")
+            }
+        }
+        1440..2880 => "Yesterday".into(),
+        2880..20_160 => format!("{} days ago", minutes / 1440),
+        20_160..86_400 => format!("{} weeks ago", minutes / 10_080),
+        _ => {
+            let months = (minutes / 43_200).max(2);
+            if months >= 12 {
+                format!(
+                    "{} year{} ago",
+                    months / 12,
+                    if months >= 24 { "s" } else { "" }
+                )
+            } else {
+                format!("{months} months ago")
+            }
+        }
+    }
 }

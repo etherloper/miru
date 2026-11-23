@@ -97,14 +97,15 @@ impl Db {
             .optional()?)
     }
 
-    /// Everything with saved progress, most recent first (for managing watch history).
-    pub fn watch_history(&self, limit: u32) -> Result<Vec<(MediaFile, Progress)>> {
+    /// Everything with saved progress, most recent first, with when each was last played
+    /// (unix milliseconds), for managing watch history.
+    pub fn watch_history(&self, limit: u32) -> Result<Vec<(MediaFile, Progress, i64)>> {
         let mut stmt = self.conn.prepare(&format!(
-            "SELECT {MEDIA_COLUMNS}, p.position, p.duration, p.watched
+            "SELECT {MEDIA_COLUMNS}, p.position, p.duration, p.watched, p.updated_at
              FROM playback_state p JOIN media_files ON media_files.id = p.file_id
              ORDER BY p.updated_at DESC LIMIT ?1"
         ))?;
-        let rows: Vec<(crate::db::RawMedia, Progress)> = stmt
+        let rows: Vec<(crate::db::RawMedia, Progress, i64)> = stmt
             .query_map([limit], |r| {
                 Ok((
                     media_row(r)?,
@@ -113,13 +114,14 @@ impl Db {
                         duration: r.get(10)?,
                         watched: r.get(11)?,
                     },
+                    r.get(12)?,
                 ))
             })?
             .collect::<rusqlite::Result<_>>()?;
         let mut out = Vec::with_capacity(rows.len());
-        for (raw, progress) in rows {
+        for (raw, progress, at) in rows {
             if let Some(file) = collect_media(std::iter::once(Ok(raw)))?.pop() {
-                out.push((file, progress));
+                out.push((file, progress, at));
             }
         }
         Ok(out)
@@ -569,7 +571,7 @@ mod history_tests {
             .watch_history(10)
             .unwrap()
             .into_iter()
-            .map(|(f, _)| f.id)
+            .map(|(f, _, _)| f.id)
             .collect();
         assert_eq!(order, [c, b, a], "most recent first");
         assert!(db.watch_history(10).unwrap()[1].1.watched);

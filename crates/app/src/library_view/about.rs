@@ -212,14 +212,13 @@ impl LibraryView {
 
     // ---- updates ------------------------------------------------------------------------
 
-    /// Checks on launch when automatic checks are on and the last one was a day ago.
+    /// Checks on every launch when automatic checks are on.
     pub(super) fn auto_check_for_updates(&mut self, cx: &mut Context<Self>) {
         if preview_mode() {
             self.update = preview_release();
             return;
         }
-        let due = unix_now() - self.settings.update_checked_at >= updates::CHECK_INTERVAL_SECS;
-        if self.settings.auto_update && due && updates::UPDATE_REPO.is_some() {
+        if self.settings.auto_update && updates::UPDATE_REPO.is_some() {
             self.check_for_updates(cx);
         }
     }
@@ -464,7 +463,7 @@ impl LibraryView {
             rows.push(
                 compact_row(
                     "Check automatically",
-                    "When Miru starts, at most once a day.",
+                    "Every time Miru starts.",
                     Some(auto.into_any_element()),
                 )
                 .into_any_element(),
@@ -623,7 +622,7 @@ impl LibraryView {
     fn update_icon_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let (icon_path, tooltip): (&'static str, SharedString) = match &self.update {
             UpdateState::Idle | UpdateState::UpToDate | UpdateState::Failed(_) => {
-                ("icons/restart.svg", "Check for updates".into())
+                ("icons/refresh.svg", "Check for updates".into())
             }
             UpdateState::Available(release) => (
                 "icons/download.svg",

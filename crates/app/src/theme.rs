@@ -19,7 +19,7 @@ pub const FONT: &str = "Segoe UI Variable Text";
 pub const RADIUS_CARD: f32 = 12.;
 
 pub fn bg() -> Rgba {
-    rgb(0x08080b)
+    rgb(0x000000)
 }
 pub fn text() -> Rgba {
     rgb(0xf5f5f7)
@@ -309,6 +309,8 @@ pub fn round_button_styled(
         .on_click(on_click)
 }
 
+const ICON_BUTTON_GROUP: &str = "icon-button";
+
 /// Borderless round icon button for quiet controls (Settings rows). A disabled one is dimmed
 /// and ignores clicks.
 pub fn icon_button(
@@ -318,21 +320,33 @@ pub fn icon_button(
     enabled: bool,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> Stateful<Div> {
-    let ink = if enabled { text() } else { text_tertiary() };
+    let glyph = svg()
+        .path(icon_path)
+        .size(px(size * 0.5))
+        .flex_shrink_0()
+        .text_color(if enabled {
+            text_secondary()
+        } else {
+            text_tertiary()
+        })
+        // Hovering brightens the icon; there is no background.
+        .when(enabled, |s| {
+            s.group_hover(ICON_BUTTON_GROUP, |s| s.text_color(text()))
+        });
     div()
         .id(id)
+        .group(ICON_BUTTON_GROUP)
         .size(px(size))
         .flex_shrink_0()
         .rounded_full()
         .flex()
         .items_center()
         .justify_center()
-        .child(icon(icon_path, size * 0.5, ink))
+        .child(glyph)
         .when(enabled, |d| {
             d.tab_index(0)
                 .focus_visible(focus_ring)
                 .cursor_pointer()
-                .hover(|s| s.bg(glass_hover()))
                 .on_click(on_click)
         })
 }

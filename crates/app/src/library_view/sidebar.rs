@@ -153,7 +153,7 @@ impl LibraryView {
             .overflow_hidden()
             .flex()
             .flex_col()
-            .bg(rgba(0x0b0b0fe6))
+            .bg(rgba(0x000000ff))
             .border_r_1()
             .border_color(rgba(0xffffff0a))
             .child(header)
@@ -263,7 +263,7 @@ impl LibraryView {
                     .items_center()
                     .max_w(px(360.))
                     .rounded_full()
-                    .bg(rgba(0x0c0c12b3))
+                    .bg(rgba(0x000000b3))
                     .text_xs()
                     .text_color(if failed {
                         rgba(0xff9b9bff)
@@ -276,7 +276,7 @@ impl LibraryView {
                 // A soft pill behind the window controls keeps them legible over bright art.
                 div()
                     .rounded_bl(px(12.))
-                    .bg(rgba(0x0c0c1280))
+                    .bg(rgba(0x00000080))
                     .child(theme::window_controls()),
             )
     }

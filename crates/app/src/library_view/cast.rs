@@ -418,7 +418,7 @@ impl LibraryView {
                                         .right_0()
                                         .bottom_0()
                                         .py_1()
-                                        .bg(rgba(0x08080bcc))
+                                        .bg(rgba(0x000000cc))
                                         .flex()
                                         .justify_center()
                                         .text_xs()

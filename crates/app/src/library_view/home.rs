@@ -235,20 +235,20 @@ impl LibraryView {
             // Scrims: left for legibility, bottom to melt into the page.
             .child(div().absolute().inset_0().bg(linear_gradient(
                 90.,
-                linear_color_stop(rgba(0x08080be6), 0.),
-                linear_color_stop(rgba(0x08080b00), 0.65),
+                linear_color_stop(rgba(0x000000e6), 0.),
+                linear_color_stop(rgba(0x00000000), 0.65),
             )))
             // Bottom fade into the page, eased by layering a short solid fade and a long soft one
             // (a single two-stop fade leaves a line where it turns solid).
             .child(div().absolute().inset_0().bg(linear_gradient(
                 0.,
                 linear_color_stop(theme::bg(), 0.),
-                linear_color_stop(rgba(0x08080b00), 0.25),
+                linear_color_stop(rgba(0x00000000), 0.25),
             )))
             .child(div().absolute().inset_0().bg(linear_gradient(
                 0.,
-                linear_color_stop(rgba(0x08080bb3), 0.),
-                linear_color_stop(rgba(0x08080b00), 0.55),
+                linear_color_stop(rgba(0x000000b3), 0.),
+                linear_color_stop(rgba(0x00000000), 0.55),
             )))
             .child(copy)
             .children(dots)
@@ -339,7 +339,7 @@ impl LibraryView {
                 linear_gradient(
                     angle,
                     linear_color_stop(rgba(edge), 0.),
-                    linear_color_stop(rgba(0x08080b00), 1.),
+                    linear_color_stop(rgba(0x00000000), 1.),
                 )
             };
             div()
@@ -356,8 +356,8 @@ impl LibraryView {
                 // card reveals more text, and a centred chevron would jump with it.
                 .items_start()
                 .pt(px(arrow_top))
-                .bg(scrim(0x08080bf2))
-                .hover(move |s| s.bg(scrim(0x08080bff)))
+                .bg(scrim(0x000000f2))
+                .hover(move |s| s.bg(scrim(0x000000ff)))
                 .cursor_pointer()
                 .child(
                     // A fixed box, so the chevron grows about its centre on hover.
@@ -398,7 +398,7 @@ impl LibraryView {
                 .bg(linear_gradient(
                     angle,
                     linear_color_stop(theme::bg(), 0.),
-                    linear_color_stop(rgba(0x08080b00), 1.),
+                    linear_color_stop(rgba(0x00000000), 1.),
                 ))
         };
 

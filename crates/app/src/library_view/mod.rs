@@ -87,7 +87,10 @@ const RECENT_LIMIT: u32 = 20;
 const SHELF_LIMIT: usize = 24;
 const CONTINUE_LIMIT: usize = 12;
 const METADATA_BATCH: u32 = 6;
-const HISTORY_LIMIT: u32 = 50;
+/// Entries read for Watch History (episodes are grouped by show, so this covers fewer titles).
+const HISTORY_LIMIT: u32 = 400;
+/// Titles Watch History shows before "Show all".
+const HISTORY_PREVIEW: usize = 6;
 /// Live results shown in the search panel.
 const PANEL_TITLE_HITS: usize = 6;
 const PANEL_EPISODE_HITS: usize = 4;
@@ -369,7 +372,9 @@ pub struct LibraryView {
     /// Library folders with counts, shown in Settings.
     roots: Vec<RootStats>,
     /// Recently watched files with progress, for the Watch History section in Settings.
-    history: Vec<(MediaFile, Progress)>,
+    history: Vec<(MediaFile, Progress, i64)>,
+    /// Watch history shows every title rather than the latest few.
+    history_expanded: bool,
     confirm_clear_history: bool,
     /// Folder awaiting confirmation before removal.
     confirm_remove: Option<i64>,
@@ -496,6 +501,7 @@ impl LibraryView {
             settings,
             roots: Vec::new(),
             history: Vec::new(),
+            history_expanded: false,
             confirm_clear_history: false,
             confirm_remove: None,
             search_query: String::new(),
