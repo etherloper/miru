@@ -540,7 +540,6 @@ impl LibraryView {
                             .text_color(theme::text_secondary())
                             .child(line.join("  ·  "))
                             .children(certification)
-                            .children(rating)
                             .when(watched, |d| {
                                 d.child(chip(
                                     div()
@@ -553,6 +552,18 @@ impl LibraryView {
                                 ))
                             }),
                     )
+                    // Ratings from other sites get a row of their own under the details.
+                    .when(!rating.is_empty(), |d| {
+                        d.child(
+                            div()
+                                .flex()
+                                .flex_wrap()
+                                .items_center()
+                                .gap_x_4()
+                                .gap_y_2()
+                                .children(rating),
+                        )
+                    })
                     .children(meta.overview.clone().map(|o| {
                         div()
                             .max_w(px(680.))
