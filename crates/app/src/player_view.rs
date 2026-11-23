@@ -16,6 +16,9 @@ use miru_player::{Chapter, PlaybackOptions, PlaybackState, Player, Track, TrackK
 use crate::theme::{self, glass_round_button, icon};
 use crate::video_host::VideoHost;
 
+mod menu;
+use menu::MenuSection;
+
 const CONTROLS_IDLE_TIMEOUT: Duration = Duration::from_millis(1800);
 /// Long enough to read as a gentle fade rather than a cut.
 const CONTROLS_FADE_MS: u64 = 480;
@@ -107,7 +110,11 @@ pub struct PlayerView {
     focus: FocusHandle,
     last_activity: Instant,
     last_saved: Instant,
-    menu: Option<TrackKind>,
+    /// The tracks-and-chapters menu, open at this section.
+    menu: Option<MenuSection>,
+    /// The keyboard highlight in the open section, and the section it last showed.
+    menu_cursor: usize,
+    menu_last: MenuSection,
     tracks: Vec<Track>,
     /// Channel layout mpv is sending to the audio device, shown in the Audio menu.
     audio_output: Option<String>,
@@ -122,7 +129,6 @@ pub struct PlayerView {
     chapters: Vec<Chapter>,
     chapters_loaded: bool,
     current_chapter: Option<usize>,
-    chapters_open: bool,
     /// Pointer position over the seek bar (0–1), for the scrub handle and time preview.
     seek_hover: Option<f32>,
     /// The episode to play next, and whether to start it automatically.
@@ -215,6 +221,8 @@ impl PlayerView {
             last_activity: Instant::now(),
             last_saved: Instant::now(),
             menu: None,
+            menu_cursor: 0,
+            menu_last: MenuSection::Audio,
             tracks: Vec::new(),
             audio_output: None,
             seek_bounds: Rc::default(),
@@ -224,7 +232,6 @@ impl PlayerView {
             chapters: Vec::new(),
             chapters_loaded: false,
             current_chapter: None,
-            chapters_open: false,
             seek_hover: None,
             up_next: None,
             autoplay: false,
@@ -442,16 +449,9 @@ impl PlayerView {
         }
     }
 
-    fn toggle_chapters(&mut self, cx: &mut Context<Self>) {
-        self.chapters_open = !self.chapters_open;
-        self.menu = None;
-        self.poke(cx);
-    }
-
     fn go_to_chapter(&mut self, index: usize, cx: &mut Context<Self>) {
         self.run(|p| p.seek_chapter(index), cx);
         self.current_chapter = Some(index);
-        self.chapters_open = false;
     }
 
     /// The pointer left the window: fade the controls now instead of after the idle delay.
@@ -471,7 +471,7 @@ impl PlayerView {
             return;
         }
         self.window_hovered = hovered;
-        if !hovered && self.menu.is_none() && !self.chapters_open {
+        if !hovered && self.menu.is_none() {
             self.last_activity = Instant::now() - CONTROLS_IDLE_TIMEOUT;
             self.seek_hover = None;
             self.volume_hover = false;
@@ -509,7 +509,6 @@ impl PlayerView {
     fn controls_visible(&self) -> bool {
         self.state.eof
             || self.menu.is_some()
-            || self.chapters_open
             || self.last_activity.elapsed() < CONTROLS_IDLE_TIMEOUT
     }
 
@@ -525,17 +524,6 @@ impl PlayerView {
     ) {
         if let Err(e) = action(&self.session.player) {
             self.error = Some(e.to_string().into());
-        }
-        self.poke(cx);
-    }
-
-    fn toggle_menu(&mut self, kind: TrackKind, cx: &mut Context<Self>) {
-        if self.menu == Some(kind) {
-            self.menu = None;
-        } else {
-            self.tracks = self.session.player.tracks();
-            self.audio_output = self.session.player.audio_output_layout();
-            self.menu = Some(kind);
         }
         self.poke(cx);
     }
@@ -561,10 +549,20 @@ impl PlayerView {
             },
             cx,
         );
-        self.menu = None;
+        // Show the choice straight away; the menu stays open.
+        if kind == TrackKind::Subtitle || id.is_some() {
+            for track in self.tracks.iter_mut().filter(|t| t.kind == kind) {
+                track.selected = Some(track.id) == id;
+            }
+        }
     }
 
     fn on_key(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
+        let k = &event.keystroke;
+        if self.menu_key(k.key.as_str(), k.modifiers.shift, cx) {
+            cx.stop_propagation();
+            return;
+        }
         match event.keystroke.key.as_str() {
             "space" | "k" => self.run(Player::toggle_pause, cx),
             "left" | "j" => {
@@ -576,11 +574,6 @@ impl PlayerView {
                 self.run(|p| p.seek_relative(step), cx)
             }
             "home" => self.run(|p| p.seek_absolute(0.0), cx),
-            "escape" if self.menu.is_some() || self.chapters_open => {
-                self.menu = None;
-                self.chapters_open = false;
-                self.poke(cx);
-            }
             "escape" | "backspace" => self.close(cx),
             _ => {}
         }
@@ -923,96 +916,6 @@ impl PlayerView {
                 )
             })
             .children(preview)
-    }
-
-    /// Chapter list, opened from the Chapters button.
-    fn render_chapters_menu(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let max_list = (f32::from(window.viewport_size().height) - 330.).clamp(140., 420.);
-        let rows = self.chapters.iter().enumerate().map(|(ix, chapter)| {
-            let current = self.current_chapter == Some(ix);
-            div()
-                .id(("chapter", ix))
-                .flex()
-                .flex_shrink_0()
-                .items_center()
-                .gap_3()
-                .px_3()
-                .py_2()
-                .rounded(px(10.))
-                .cursor_pointer()
-                .when(current, |d| d.bg(theme::glass()))
-                .hover(|s| s.bg(theme::glass_hover()))
-                .child(
-                    div()
-                        .w(px(16.))
-                        .flex_shrink_0()
-                        .children(current.then(|| icon("icons/check.svg", 16., theme::text()))),
-                )
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .truncate()
-                        .text_sm()
-                        .font_weight(if current {
-                            FontWeight::SEMIBOLD
-                        } else {
-                            FontWeight::MEDIUM
-                        })
-                        .child(
-                            chapter
-                                .title
-                                .clone()
-                                .unwrap_or_else(|| format!("Chapter {}", ix + 1)),
-                        ),
-                )
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(theme::text_tertiary())
-                        .child(format_time(chapter.time)),
-                )
-                .on_click(
-                    cx.listener(move |this, _: &ClickEvent, _, cx| this.go_to_chapter(ix, cx)),
-                )
-        });
-        div()
-            .id("chapters-menu")
-            // Above the click-outside layer: without this, pressing a row also reached that
-            // layer, which closed the menu before the click could land.
-            .occlude()
-            .absolute()
-            .right(px(EDGE))
-            .bottom(px(150.))
-            .w(px(360.))
-            .p_2()
-            .rounded(px(18.))
-            .bg(theme::panel())
-            .border_1()
-            .border_color(rgba(0xffffff26))
-            .shadow(theme::card_shadow(1.))
-            .flex()
-            .flex_col()
-            .child(
-                div()
-                    .px_3()
-                    .pt_2()
-                    .pb_2()
-                    .text_xs()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(theme::text_tertiary())
-                    .child(format!("CHAPTERS · {}", self.chapters.len())),
-            )
-            .child(
-                div()
-                    .id("chapter-list")
-                    .max_h(px(max_list))
-                    .overflow_y_scroll()
-                    .flex()
-                    .flex_col()
-                    .gap_0p5()
-                    .children(rows),
-            )
     }
 
     /// Once the credits start: a "Next episode" button that starts white and, while autoplay
@@ -1378,7 +1281,6 @@ impl PlayerView {
     }
 
     fn render_bottom_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let menu = self.menu;
         let chapter_name: Option<String> = self
             .current_chapter
             .and_then(|i| self.chapters.get(i))
@@ -1388,16 +1290,6 @@ impl PlayerView {
                     .unwrap_or_else(|| format!("Chapter {}", self.current_chapter.unwrap_or(0) + 1))
             });
         let remaining = (self.state.duration - self.state.position).max(0.);
-        let track_button =
-            |id: &'static str, icon_path: &'static str, kind: TrackKind, cx: &mut Context<Self>| {
-                glass_round_button(
-                    id,
-                    icon_path,
-                    44.,
-                    menu == Some(kind),
-                    cx.listener(move |this, _, _, cx| this.toggle_menu(kind, cx)),
-                )
-            };
 
         div()
             .absolute()
@@ -1445,27 +1337,14 @@ impl PlayerView {
                             ),
                     )
                     .child(self.render_volume(cx))
-                    .child(track_button(
-                        "audio",
-                        "icons/waveform.svg",
-                        TrackKind::Audio,
-                        cx,
-                    ))
-                    .child(track_button(
-                        "subtitles",
+                    // Audio, subtitles and chapters, in one menu.
+                    .child(glass_round_button(
+                        "player-menu",
                         "icons/captions.svg",
-                        TrackKind::Subtitle,
-                        cx,
-                    ))
-                    .when(!self.chapters.is_empty(), |d| {
-                        d.child(glass_round_button(
-                            "chapters",
-                            "icons/chapters.svg",
-                            44.,
-                            self.chapters_open,
-                            cx.listener(|this, _, _, cx| this.toggle_chapters(cx)),
-                        ))
-                    }),
+                        44.,
+                        self.menu.is_some(),
+                        cx.listener(|this, _, _, cx| this.toggle_menu(cx)),
+                    )),
             )
             .child(self.render_seek_bar(cx))
             .child(
@@ -1478,163 +1357,6 @@ impl PlayerView {
                     .child(format_time(self.state.position))
                     .child(format!("-{}", format_time(remaining))),
             )
-    }
-
-    fn render_track_menu(
-        &self,
-        kind: TrackKind,
-        window: &Window,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        struct Entry {
-            primary: SharedString,
-            detail: SharedString,
-            id: Option<i64>,
-            selected: bool,
-        }
-        let of_kind: Vec<&Track> = self.tracks.iter().filter(|t| t.kind == kind).collect();
-        let mut entries = Vec::new();
-        if kind == TrackKind::Subtitle {
-            entries.push(Entry {
-                primary: "Off".into(),
-                detail: SharedString::default(),
-                id: None,
-                selected: !of_kind.iter().any(|t| t.selected),
-            });
-        }
-        entries.extend(of_kind.iter().map(|t| Entry {
-            primary: t.primary().into(),
-            detail: t.detail().into(),
-            id: Some(t.id),
-            selected: t.selected,
-        }));
-        let heading = match kind {
-            TrackKind::Audio => "Audio",
-            TrackKind::Subtitle => "Subtitles",
-        };
-        // Long track lists scroll inside the panel instead of running off the top of the window.
-        let max_list = (f32::from(window.viewport_size().height) - 330.).clamp(140., 380.);
-        let footer = (kind == TrackKind::Audio).then(|| {
-            let output = match self.audio_output.as_deref() {
-                Some("stereo") => "Stereo".to_string(),
-                Some("mono") => "Mono".to_string(),
-                Some(layout) => format!("{layout} surround"),
-                None => "—".to_string(),
-            };
-            div()
-                .mt_1()
-                .pt_2()
-                .px_3()
-                .pb_1()
-                .border_t_1()
-                .border_color(theme::glass_border())
-                .flex()
-                .justify_between()
-                .text_xs()
-                .text_color(theme::text_tertiary())
-                .child("Output")
-                .child(div().text_color(theme::text_secondary()).child(output))
-        });
-
-        div()
-            .id("track-menu")
-            // Above the click-outside layer (see the chapters menu).
-            .occlude()
-            .absolute()
-            .right(px(EDGE))
-            .bottom(px(150.))
-            .w(px(340.))
-            .p_2()
-            .rounded(px(18.))
-            .bg(theme::panel())
-            .border_1()
-            .border_color(rgba(0xffffff26))
-            .shadow(theme::card_shadow(1.))
-            .flex()
-            .flex_col()
-            .child(
-                div()
-                    .px_3()
-                    .pt_2()
-                    .pb_2()
-                    .text_xs()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(theme::text_tertiary())
-                    .child(format!("{} · {}", heading.to_uppercase(), of_kind.len())),
-            )
-            .when(entries.is_empty(), |d| {
-                d.child(
-                    div()
-                        .px_3()
-                        .py_2()
-                        .text_sm()
-                        .text_color(theme::text_secondary())
-                        .child("No tracks"),
-                )
-            })
-            .child(
-                div()
-                    .id("track-list")
-                    .max_h(px(max_list))
-                    .overflow_y_scroll()
-                    .flex()
-                    .flex_col()
-                    .gap_0p5()
-                    .children(entries.into_iter().enumerate().map(|(ix, entry)| {
-                        let Entry {
-                            primary,
-                            detail,
-                            id,
-                            selected,
-                        } = entry;
-                        div()
-                            .id(("track", ix))
-                            .flex()
-                            .flex_shrink_0()
-                            .items_center()
-                            .gap_3()
-                            .px_3()
-                            .py_2()
-                            .rounded(px(10.))
-                            .cursor_pointer()
-                            .when(selected, |d| d.bg(theme::glass()))
-                            .hover(|s| s.bg(theme::glass_hover()))
-                            .child(div().w(px(16.)).flex_shrink_0().children(
-                                selected.then(|| icon("icons/check.svg", 16., theme::text())),
-                            ))
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .flex()
-                                    .flex_col()
-                                    .child(
-                                        div()
-                                            .text_sm()
-                                            .truncate()
-                                            .font_weight(if selected {
-                                                FontWeight::SEMIBOLD
-                                            } else {
-                                                FontWeight::MEDIUM
-                                            })
-                                            .child(primary),
-                                    )
-                                    .when(!detail.is_empty(), |d| {
-                                        d.child(
-                                            div()
-                                                .text_xs()
-                                                .truncate()
-                                                .text_color(theme::text_tertiary())
-                                                .child(detail),
-                                        )
-                                    }),
-                            )
-                            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                                this.choose_track(kind, id, cx)
-                            }))
-                    })),
-            )
-            .children(footer)
     }
 }
 
@@ -1728,7 +1450,7 @@ impl Render for PlayerView {
                 .child(self.render_bottom_bar(cx));
             // With a menu open, a click anywhere else just closes it (like a popover), rather
             // than also pressing whatever is underneath.
-            if self.menu.is_some() || self.chapters_open {
+            if self.menu.is_some() {
                 overlay = overlay.child(
                     div()
                         .id("menu-dismiss")
@@ -1739,18 +1461,14 @@ impl Render for PlayerView {
                             MouseButton::Left,
                             cx.listener(|this, _, _, cx| {
                                 this.menu = None;
-                                this.chapters_open = false;
                                 this.poke(cx);
                                 cx.stop_propagation();
                             }),
                         ),
                 );
             }
-            if let Some(kind) = self.menu {
-                overlay = overlay.child(self.render_track_menu(kind, window, cx));
-            }
-            if self.chapters_open {
-                overlay = overlay.child(self.render_chapters_menu(window, cx));
+            if let Some(section) = self.menu {
+                overlay = overlay.child(self.render_player_menu(section, window, cx));
             }
             let animation =
                 Animation::new(theme::motion(self.controls_fade_ms)).with_easing(ease_in_out);
