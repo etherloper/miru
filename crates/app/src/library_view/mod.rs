@@ -302,7 +302,7 @@ pub struct LibraryView {
     watched_shows: std::collections::HashSet<String>,
     /// Grid whose genre dropdown is open, and when it last closed (so the click that closed it
     /// by landing on the trigger doesn't reopen it).
-    genre_menu: Option<Tab>,
+    genre_menu: Option<(Tab, GridMenu)>,
     genre_menu_closed: Instant,
     /// Detail page "⋯" menu: open, and when it last closed (see `genre_menu_closed`).
     more_menu: bool,
