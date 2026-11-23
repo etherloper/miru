@@ -10,7 +10,7 @@ use crate::text_edit::{self, KeyOutcome, TextEdit};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum KeyKind {
     Tmdb,
-    Omdb,
+    Mdblist,
 }
 
 /// Where an update stands.
@@ -87,8 +87,8 @@ impl LibraryView {
                     self.update_settings(|s| s.tmdb_key = Some(key), cx);
                     self.apply_tmdb_key(cx);
                 }
-                KeyKind::Omdb => {
-                    self.update_settings(|s| s.omdb_key = Some(key), cx);
+                KeyKind::Mdblist => {
+                    self.update_settings(|s| s.mdblist_key = Some(key), cx);
                     self.refresh_open_ratings(cx);
                 }
             }
@@ -102,7 +102,7 @@ impl LibraryView {
                 self.update_settings(|s| s.tmdb_key = None, cx);
                 self.apply_tmdb_key(cx);
             }
-            KeyKind::Omdb => self.update_settings(|s| s.omdb_key = None, cx),
+            KeyKind::Mdblist => self.update_settings(|s| s.mdblist_key = None, cx),
         }
     }
 
@@ -135,8 +135,7 @@ impl LibraryView {
         cx.notify();
     }
 
-    /// Rows for the Metadata section: the TMDB key (where it comes from, or your own) and the
-    /// optional OMDb key for outside ratings.
+    /// Rows for the Metadata section: the TMDB key (where it comes from, or your own).
     pub(super) fn metadata_rows(&self, window: &Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let tmdb_description = match self.tmdb_source {
             Some(KeySource::Settings) => "Using the key you added.",
@@ -146,12 +145,6 @@ impl LibraryView {
                  from your folders only. Keys are free at themoviedb.org."
             }
         };
-        let omdb_description = if self.settings.omdb_key.is_some() {
-            "Showing IMDb, Rotten Tomatoes and Metacritic ratings on detail pages."
-        } else {
-            "Optional: add an OMDb key to show IMDb, Rotten Tomatoes and Metacritic ratings on \
-             detail pages. Keys are free at omdbapi.com."
-        };
         vec![
             setting_row(
                 "TMDB key",
@@ -159,20 +152,19 @@ impl LibraryView {
                 Some(self.key_control(KeyKind::Tmdb, window, cx)),
             )
             .into_any_element(),
-            setting_row(
-                "OMDb key",
-                Some(omdb_description),
-                Some(self.key_control(KeyKind::Omdb, window, cx)),
-            )
-            .into_any_element(),
         ]
     }
 
     /// The edit field (while adding a key) or the Add/Change and Remove buttons.
-    fn key_control(&self, kind: KeyKind, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn key_control(
+        &self,
+        kind: KeyKind,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let has_key = match kind {
             KeyKind::Tmdb => self.settings.tmdb_key.is_some(),
-            KeyKind::Omdb => self.settings.omdb_key.is_some(),
+            KeyKind::Mdblist => self.settings.mdblist_key.is_some(),
         };
         let editing = self.key_draft.as_ref().filter(|(k, _)| *k == kind);
         match editing {

@@ -216,6 +216,27 @@ const MIGRATIONS: &[&str] = &[
         PRIMARY KEY (kind, title, year)
     );
 ",
+    r"
+    -- Ratings now come from MDBList, one row per site, so any mix of sites can be shown.
+    DROP TABLE title_ratings;
+    CREATE TABLE title_scores (
+        kind    TEXT NOT NULL,
+        title   TEXT NOT NULL COLLATE NOCASE,
+        year    INTEGER NOT NULL,
+        source  TEXT NOT NULL,
+        value   REAL,
+        score   INTEGER,
+        votes   INTEGER,
+        PRIMARY KEY (kind, title, year, source)
+    );
+    CREATE TABLE rating_fetches (
+        kind        TEXT NOT NULL,
+        title       TEXT NOT NULL COLLATE NOCASE,
+        year        INTEGER NOT NULL,
+        fetched_at  INTEGER NOT NULL,
+        PRIMARY KEY (kind, title, year)
+    );
+",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]

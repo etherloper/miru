@@ -402,127 +402,25 @@ impl LibraryView {
                 .child(content)
         };
         let certification = meta.certification.as_deref().map(age_rating_badge);
-        // IMDb, Rotten Tomatoes and Metacritic when OMDb has them (an OMDb key is set);
-        // otherwise TMDB's audience score.
-        // Rating badges sit bare beside the outlined age-rating chip.
-        let badge = |content: AnyElement| {
-            div()
-                .flex()
-                .items_center()
-                .h(px(22.))
-                .text_xs()
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(theme::text())
-                .child(content)
-        };
-        let outside = self
-            .ratings
-            .get(&item.key)
-            .filter(|r| !r.is_empty() && self.settings.omdb_key.is_some());
-        let rating: Vec<AnyElement> = match outside {
-            Some(r) => {
-                let mut chips = Vec::new();
-                if let Some(imdb) = r.imdb_tenths {
-                    chips.push(
-                        badge(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap_1p5()
-                                // IMDb's yellow logo plate.
-                                .child(
-                                    div()
-                                        .h(px(16.))
-                                        .px(px(5.))
-                                        .flex()
-                                        .items_center()
-                                        .rounded(px(3.))
-                                        .bg(gpui::rgb(0xf5c518))
-                                        .text_color(gpui::rgb(0x000000))
-                                        .text_size(px(11.))
-                                        .font_weight(FontWeight::BLACK)
-                                        .child("IMDb"),
-                                )
-                                .child(format!("{:.1}", f32::from(imdb) / 10.))
-                                .into_any_element(),
-                        )
-                        .into_any_element(),
-                    );
-                }
-                if let Some(rt) = r.rotten_tomatoes {
-                    // Red for "fresh" (60% and up), green for "rotten", as on the site.
-                    let fresh = rt >= 60;
-                    chips.push(
-                        badge(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap_1p5()
-                                // The fresh tomato or the rotten splat.
-                                .child(brand_image(if fresh {
-                                    "brand/rt-fresh.svg"
-                                } else {
-                                    "brand/rt-rotten.svg"
-                                }))
-                                .child(format!("{rt}%"))
-                                .into_any_element(),
-                        )
-                        .into_any_element(),
-                    );
-                }
-                if let Some(mc) = r.metacritic {
-                    // Metacritic's colours: green from 61, yellow 40–60, red below.
-                    let colour = match mc {
-                        61.. => 0x66cc33,
-                        40..=60 => 0xffcc33,
-                        _ => 0xff0000,
-                    };
-                    chips.push(
-                        badge(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap_1p5()
-                                // Metacritic's mark, then its coloured score box.
-                                .child(brand_image("brand/metacritic.svg"))
-                                .child(
-                                    div()
-                                        .h(px(16.))
-                                        .min_w(px(20.))
-                                        .px(px(3.))
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .rounded(px(3.))
-                                        .bg(gpui::rgb(colour))
-                                        .text_color(gpui::rgb(0x000000))
-                                        .font_weight(FontWeight::BOLD)
-                                        .child(mc.to_string()),
-                                )
-                                .into_any_element(),
-                        )
-                        .into_any_element(),
-                    );
-                }
-                chips
-            }
-            None => meta
-                .rating_tenths
-                .map(|r| {
-                    badge(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap_1()
-                            .child(div().text_color(gpui::rgb(0xf5c518)).child("★"))
-                            .child(format!("{:.1}", f32::from(r) / 10.))
-                            .into_any_element(),
-                    )
-                    .into_any_element()
-                })
-                .into_iter()
-                .collect(),
-        };
+        // The chosen sites' ratings from MDBList; otherwise TMDB's audience score.
+        let mut rating = self.rating_badges(&item.key);
+        if rating.is_empty()
+            && let Some(r) = meta.rating_tenths
+        {
+            rating.push(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_1()
+                    .h(px(22.))
+                    .text_xs()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(theme::text())
+                    .child(div().text_color(gpui::rgb(0xf5c518)).child("★"))
+                    .child(format!("{:.1}", f32::from(r) / 10.))
+                    .into_any_element(),
+            );
+        }
         // "Starring" with the first few names, then a link to the full cast sheet.
         let cast_item = item.clone();
         let starring = (!meta.cast.is_empty()).then(|| {
@@ -773,15 +671,6 @@ pub(super) fn hero_art(item: &LibraryItem) -> AnyElement {
             .bg(theme::placeholder(&item.key.title, meta.accent_rgb))
             .into_any_element(),
     }
-}
-
-/// A review site's mark, drawn in its own colours. Built-in images go through GPUI's own
-/// image cache: the library's cache only loads artwork files from disk.
-fn brand_image(path: &'static str) -> impl IntoElement {
-    div()
-        .flex_shrink_0()
-        .image_cache(gpui::retain_all(path))
-        .child(gpui::img(path).size(px(16.)))
 }
 
 /// An age rating drawn the way its board shows it: the BBFC's coloured squares (U, PG, 12A,

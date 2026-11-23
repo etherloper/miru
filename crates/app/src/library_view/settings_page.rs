@@ -336,6 +336,7 @@ impl LibraryView {
         let history_rows = self.history_rows(cx);
         let backup_rows = self.backup_rows(cx);
         let metadata_rows = self.metadata_rows(window, cx);
+        let ratings_rows = self.ratings_rows(window, cx);
         let about_rows = self.about_rows(cx);
         folders.push(library_actions.into_any_element());
 
@@ -386,6 +387,11 @@ impl LibraryView {
                                 "Metadata",
                                 "Where posters, artwork and details come from.",
                                 metadata_rows,
+                            ))
+                            .child(section(
+                                "Ratings",
+                                "Ratings from other sites on movie and show pages, via MDBList.",
+                                ratings_rows,
                             ))
                             .child(section(
                                 "Watch History",
