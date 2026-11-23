@@ -1472,7 +1472,7 @@ impl PlayerView {
                 div()
                     .flex()
                     .justify_between()
-                    .text_xs()
+                    .text_size(px(14.))
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(rgba(0xffffffcc))
                     .child(format_time(self.state.position))
