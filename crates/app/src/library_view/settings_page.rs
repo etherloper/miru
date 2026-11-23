@@ -811,7 +811,7 @@ pub(super) fn section(
                 // Outlined on the black page rather than filled grey: on OLED panels a
                 // near-black fill looks blotchy, while black with a hairline stays clean.
                 .border_1()
-                .border_color(rgba(0xffffff24))
+                .border_color(rgba(0xffffff38))
                 .flex()
                 .flex_col()
                 .children(rows),
