@@ -170,7 +170,6 @@ impl LibraryView {
                         .border_color(rgba(0xffffff26))
                         .shadow(theme::card_shadow(1.))
                 })
-                .child(icon("icons/grip.svg", 16., theme::text_tertiary()))
                 .child(icon(icon_path, 18., theme::text_secondary()))
                 .child(
                     div()
@@ -178,6 +177,7 @@ impl LibraryView {
                         .font_weight(FontWeight::MEDIUM)
                         .child(item.label()),
                 )
+                .child(icon("icons/grip.svg", 16., theme::text_tertiary()))
                 .when(!lifted, |d| {
                     d.tab_index(0)
                         .focus_visible(theme::focus_ring)
