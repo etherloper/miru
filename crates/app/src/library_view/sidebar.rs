@@ -61,10 +61,10 @@ impl LibraryView {
             div()
                 .absolute()
                 .left_full()
-                .top_0()
-                .bottom_0()
-                .flex()
-                .items_center()
+                // A zero-size point at the element's vertical middle: the anchored label is absolutely
+                // positioned, so flex centring wouldn't apply to it.
+                .top(gpui::relative(0.5))
+                .size_0()
                 .child(
                     gpui::deferred(
                         gpui::anchored().child(
