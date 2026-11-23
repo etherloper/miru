@@ -837,7 +837,7 @@ fn age_rating_badge(rating: &str) -> AnyElement {
         .rounded(px(if us { 3. } else { 6. }))
         .border(px(if us { 1.5 } else { 1. }))
         .border_color(if us {
-            gpui::rgb(0xffffff).into()
+            gpui::rgb(0xffffff)
         } else {
             rgba(0xffffff4d)
         })
