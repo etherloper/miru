@@ -769,9 +769,11 @@ impl LibraryView {
             _ => format!("{title} · {detail}").into(),
         };
 
+        // Hovering anywhere on the control lights up its badge.
         let control = if collapsed {
             div()
                 .id("nav-update")
+                .group(UPDATE_GROUP)
                 .tab_index(0)
                 .focus_visible(theme::focus_ring)
                 .mb_2()
@@ -782,23 +784,17 @@ impl LibraryView {
         } else {
             div()
                 .id("nav-update")
+                .group(UPDATE_GROUP)
                 .tab_index(0)
                 .focus_visible(theme::focus_ring)
                 .mx_3()
                 .mb_2()
-                .p_2()
-                .pr_3()
+                // Lines the badge up with the navigation icons above it.
+                .px(px(5.))
+                .py_1()
                 .flex()
                 .items_center()
                 .gap_3()
-                .rounded(px(12.))
-                .bg(if ready {
-                    rgba(0xffffff1f)
-                } else {
-                    rgba(0xffffff0d)
-                })
-                .border_1()
-                .border_color(theme::glass_border())
                 .child(badge)
                 .child(
                     div()
@@ -823,24 +819,26 @@ impl LibraryView {
                 )
                 .when(failed, |d| d.tooltip(theme::text_tooltip_owned(tooltip)))
         };
-        let control = match action {
-            Some(action) => control
-                .cursor_pointer()
-                .when(!collapsed, |d| d.hover(|s| s.bg(rgba(0xffffff26))))
-                .on_click(cx.listener(move |this, _, _, cx| match action {
-                    UpdateAction::Download => this.download_update(cx),
-                    UpdateAction::Install => this.install_update(cx),
-                })),
-            None => control,
-        };
+        let control =
+            match action {
+                Some(action) => control.cursor_pointer().on_click(cx.listener(
+                    move |this, _, _, cx| match action {
+                        UpdateAction::Download => this.download_update(cx),
+                        UpdateAction::Install => this.install_update(cx),
+                    },
+                )),
+                None => control,
+            };
         Some(control.into_any_element())
     }
 }
 
 /// The round part of the update control: a download arrow with a violet dot; while
 /// downloading, a ring filling around it; when ready, a white disc with a restart arrow.
+const UPDATE_GROUP: &str = "update-control";
+
 fn update_badge(size: f32, progress: Option<f32>, ready: bool, failed: bool) -> impl IntoElement {
-    let group = "update-badge";
+    let group = UPDATE_GROUP;
     let (fill, ink, path) = if ready {
         (theme::text(), theme::bg(), "icons/restart.svg")
     } else if failed {
@@ -881,7 +879,6 @@ fn update_badge(size: f32, progress: Option<f32>, ready: bool, failed: bool) -> 
         .inset_0()
     });
     div()
-        .group(group)
         .relative()
         .size(px(size))
         .flex_shrink_0()
