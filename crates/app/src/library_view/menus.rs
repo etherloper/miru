@@ -1,4 +1,6 @@
-//! The "⋯" menu on detail pages (Mark as watched, Fix match).
+//! The "⋯" menus: on detail pages (Mark as watched, Fix match, collections) and on posters.
+
+use gpui::Stateful;
 
 use super::*;
 
@@ -8,6 +10,8 @@ pub(super) struct MenuEntry {
     pub label: SharedString,
     pub icon: &'static str,
     pub action: MenuAction,
+    /// Starts a new group, with a hairline above it.
+    pub divided: bool,
 }
 
 impl MenuEntry {
@@ -20,7 +24,13 @@ impl MenuEntry {
             label: label.into(),
             icon,
             action: Rc::new(action),
+            divided: false,
         }
+    }
+
+    pub fn divided(mut self) -> Self {
+        self.divided = true;
+        self
     }
 }
 
@@ -31,9 +41,79 @@ impl LibraryView {
         }
     }
 
+    /// A menu's panel: rows of icon and label; choosing one closes the menu (`close`) and
+    /// runs it. Pressing outside closes it too.
+    pub(super) fn menu_panel(
+        &self,
+        id: &'static str,
+        entries: Vec<MenuEntry>,
+        close: fn(&mut LibraryView),
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let rows = entries.into_iter().enumerate().map(|(ix, entry)| {
+            let action = entry.action.clone();
+            let row = div()
+                .id((id, ix))
+                .h(px(36.))
+                .px_3()
+                .flex()
+                .items_center()
+                .gap_3()
+                .rounded(px(8.))
+                .text_sm()
+                .text_color(theme::text_secondary())
+                .cursor_pointer()
+                .hover(|s| s.bg(rgba(0xffffff14)).text_color(theme::text()))
+                .child(icon(entry.icon, 15., theme::text_secondary()))
+                .child(div().min_w_0().truncate().child(entry.label))
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    close(this);
+                    action(this, window, cx);
+                    cx.notify();
+                }));
+            if entry.divided && ix > 0 {
+                div()
+                    .flex()
+                    .flex_col()
+                    .child(div().mx_2().my_1().h(px(1.)).bg(rgba(0xffffff12)))
+                    .child(row)
+                    .into_any_element()
+            } else {
+                row.into_any_element()
+            }
+        });
+        div()
+            .id(id)
+            .occlude()
+            .min_w(px(220.))
+            .max_w(px(320.))
+            .p_1p5()
+            .flex()
+            .flex_col()
+            .rounded(px(14.))
+            .bg(theme::panel())
+            .border_1()
+            .border_color(theme::glass_border())
+            .shadow(theme::frost_shadow())
+            .children(rows)
+            .on_mouse_down_out(cx.listener(move |this, _, _, cx| {
+                close(this);
+                cx.notify();
+            }))
+    }
+
     /// Round "⋯" button beside a detail page's play buttons, opening a small menu below it.
-    pub(super) fn more_menu(&self, entries: Vec<MenuEntry>, cx: &mut Context<Self>) -> AnyElement {
+    /// With `title`, the menu also offers adding it to (or removing it from) collections.
+    pub(super) fn more_menu(
+        &self,
+        mut entries: Vec<MenuEntry>,
+        title: Option<&TitleKey>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let open = self.more_menu;
+        if open && let Some(key) = title {
+            entries.extend(self.collection_entries(key));
+        }
         let trigger = theme::round_button_styled(
             "detail-more",
             "icons/more.svg",
@@ -51,51 +131,12 @@ impl LibraryView {
         .tooltip(theme::text_tooltip("More"));
 
         let menu = open.then(|| {
-            let rows = entries.into_iter().enumerate().map(|(ix, entry)| {
-                let action = entry.action.clone();
-                div()
-                    .id(("more-option", ix))
-                    .h(px(36.))
-                    .px_3()
-                    .flex()
-                    .items_center()
-                    .gap_3()
-                    .rounded(px(8.))
-                    .text_sm()
-                    .text_color(theme::text_secondary())
-                    .cursor_pointer()
-                    .hover(|s| s.bg(rgba(0xffffff14)).text_color(theme::text()))
-                    .child(icon(entry.icon, 15., theme::text_secondary()))
-                    .child(entry.label)
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.close_more_menu();
-                        action(this, window, cx);
-                        cx.notify();
-                    }))
-            });
-            let list = div()
-                .id("more-menu")
-                .occlude()
-                .mt_2()
-                .min_w(px(220.))
-                .p_1p5()
-                .flex()
-                .flex_col()
-                .rounded(px(14.))
-                .bg(theme::panel())
-                .border_1()
-                .border_color(theme::glass_border())
-                .shadow(theme::frost_shadow())
-                .children(rows)
-                .on_mouse_down_out(cx.listener(|this, _, _, cx| {
-                    this.close_more_menu();
-                    cx.notify();
-                }));
+            let list = self.menu_panel("more-menu", entries, |this| this.close_more_menu(), cx);
             div().absolute().top_full().left_0().child(
                 gpui::deferred(
                     gpui::anchored()
                         .snap_to_window_with_margin(px(12.))
-                        .child(list),
+                        .child(div().mt_2().child(list)),
                 )
                 .with_priority(1),
             )

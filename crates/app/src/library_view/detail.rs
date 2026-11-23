@@ -84,6 +84,7 @@ impl LibraryView {
                     this.open_fix_match(fix_item.clone(), cx)
                 }),
             ],
+            Some(&item.key),
             cx,
         ));
 
@@ -227,7 +228,7 @@ impl LibraryView {
             "icons/pencil.svg",
             move |this, _, cx| this.open_fix_match(fix_item.clone(), cx),
         ));
-        actions.push(self.more_menu(entries, cx));
+        actions.push(self.more_menu(entries, Some(&item.key), cx));
 
         let season_tabs = (seasons.len() > 1).then(|| {
             div().flex().gap_2().children(seasons.iter().map(|&s| {

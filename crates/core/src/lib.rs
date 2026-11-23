@@ -1,3 +1,4 @@
+pub mod collections;
 pub mod db;
 pub mod episodes;
 pub mod library;

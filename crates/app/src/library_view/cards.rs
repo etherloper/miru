@@ -9,6 +9,7 @@ use std::cell::RefCell;
 
 use gpui::{Entity, StyleRefinement, WeakEntity};
 
+use super::poster_drag::CarryArt;
 use super::*;
 use crate::image_cache::BoundedImageCache;
 
@@ -44,6 +45,8 @@ pub(super) enum CardContent {
 
 pub(super) struct Card {
     library: WeakEntity<LibraryView>,
+    /// Where the card appears (a shelf, "grid", "collection"…).
+    scope: &'static str,
     images: Entity<BoundedImageCache>,
     content: CardContent,
     hovered: bool,
@@ -75,6 +78,7 @@ impl LibraryView {
         size: impl FnOnce(bool) -> (f32, f32),
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let scope = slot.0;
         let existing = self.cards.0.borrow_mut().get_mut(&slot).map(|s| {
             s.last_used = Instant::now();
             s.card.clone()
@@ -95,6 +99,7 @@ impl LibraryView {
                     (cx.weak_entity(), self.image_cache.clone(), content());
                 let card = cx.new(|_| Card {
                     library,
+                    scope,
                     images,
                     content,
                     hovered: false,
@@ -287,7 +292,64 @@ impl Card {
             .ok();
     }
 
-    fn poster_body(&self, item: &LibraryItem, width: f32, watched: bool) -> Div {
+    /// The "⋯" button on a hovered poster, opening its menu (watched, history, collections).
+    fn poster_more_button(&self, key: TitleKey, cx: &mut Context<Self>) -> AnyElement {
+        let scope = self.scope;
+        div()
+            .id("card-more")
+            .absolute()
+            .right(px(10.))
+            .bottom(px(10.))
+            .size(px(32.))
+            .rounded_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(rgba(0x0a0a0ed9))
+            .border_1()
+            .border_color(rgba(0xffffff2e))
+            .cursor_pointer()
+            .hover(|s| s.bg(rgba(0x2a2a30f2)).border_color(rgba(0xffffff59)))
+            .child(icon("icons/more.svg", 16., theme::text()))
+            // The press belongs to the button: it doesn't pick the poster up or scroll the row.
+            .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(cx.listener(move |card, event: &ClickEvent, _, cx| {
+                cx.stop_propagation();
+                let position = event.position();
+                let key = key.clone();
+                card.library
+                    .update(cx, |library, cx| {
+                        let same = library.card_menu.as_ref().is_some_and(|m| m.key == key);
+                        // A press outside an open menu closes it; don't reopen it at once.
+                        let just_closed =
+                            library.card_menu_closed.elapsed() < Duration::from_millis(200);
+                        if same {
+                            library.close_card_menu();
+                            cx.notify();
+                        } else if !just_closed {
+                            library.open_card_menu(key, scope, position, cx);
+                        }
+                    })
+                    .ok();
+            }))
+            .with_animation(
+                ("card-more-in", self.hover_epoch),
+                Animation::new(theme::motion(160)).with_easing(ease_out_quint()),
+                |el, t| el.opacity(t),
+            )
+            .into_any_element()
+    }
+
+    fn poster_body(
+        &self,
+        item: &LibraryItem,
+        width: f32,
+        watched: bool,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let more = self
+            .hovered
+            .then(|| self.poster_more_button(item.key.clone(), cx));
         let meta = item.metadata.as_ref();
         let title: SharedString = item.display_title().to_string().into();
         let caption: SharedString = match item.key.kind {
@@ -336,7 +398,8 @@ impl Card {
                         .border_color(rgba(0xffffff26))
                         .child(icon("icons/check.svg", 12., theme::text())),
                 )
-            });
+            })
+            .children(more);
         div()
             .w(px(width))
             .flex()
@@ -656,7 +719,7 @@ impl Render for Card {
             } => {
                 let key = item.key.clone();
                 (
-                    self.poster_body(item, *width, *watched),
+                    self.poster_body(&item.clone(), *width, *watched, cx),
                     Box::new(move |card, cx| {
                         card.library
                             .update(cx, |library, cx| library.open_key(&key, cx))
@@ -692,9 +755,35 @@ impl Render for Card {
                 )
             }
         };
+        let press = match &self.content {
+            CardContent::Poster { item, width, .. } => {
+                let art = CarryArt {
+                    poster: item.metadata.as_ref().and_then(|m| m.poster_file.clone()),
+                    title: item.display_title().to_string().into(),
+                    accent: item.metadata.as_ref().and_then(|m| m.accent_rgb),
+                };
+                Some((item.key.clone(), art, *width))
+            }
+            _ => None,
+        };
+        let scope = self.scope;
         div()
             .id("card")
             .tab_index(0)
+            // Pressing a poster may become a drag onto a collection (see poster_drag.rs).
+            .when_some(press, |d, (key, art, width)| {
+                d.on_mouse_down(
+                    gpui::MouseButton::Left,
+                    cx.listener(move |card, event: &gpui::MouseDownEvent, _, cx| {
+                        let (key, art) = (key.clone(), art.clone());
+                        card.library
+                            .update(cx, |library, cx| {
+                                library.press_poster(key, art, scope, event.position, width, cx)
+                            })
+                            .ok();
+                    }),
+                )
+            })
             .rounded(px(theme::RADIUS_CARD + 2.))
             .focus_visible(theme::focus_ring)
             .cursor_pointer()

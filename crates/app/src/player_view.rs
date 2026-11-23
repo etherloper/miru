@@ -56,6 +56,7 @@ pub enum PlayerEvent {
         file_id: i64,
         kind: TrackKind,
         lang: Option<String>,
+        title: Option<String>,
         id: Option<i64>,
     },
     /// The current episode finished and the next one should start.
@@ -254,6 +255,7 @@ impl PlayerView {
     }
 
     fn tick(&mut self, cx: &mut Context<Self>) {
+        self.session.player.apply_preferred_tracks();
         let state = self.session.player.state();
         if state.video_ready && self.video_ready_at.is_none() {
             self.video_ready_at = Some(Instant::now());
@@ -542,16 +544,12 @@ impl PlayerView {
         if let Some(file_id) = self.file_id
             && (kind == TrackKind::Subtitle || id.is_some())
         {
-            let lang = id.and_then(|id| {
-                self.tracks
-                    .iter()
-                    .find(|t| t.kind == kind && t.id == id)
-                    .and_then(|t| t.lang.clone())
-            });
+            let track = id.and_then(|id| self.tracks.iter().find(|t| t.kind == kind && t.id == id));
             cx.emit(PlayerEvent::TrackChosen {
                 file_id,
                 kind,
-                lang,
+                lang: track.and_then(|t| t.lang.clone()),
+                title: track.and_then(|t| t.title.clone()),
                 id,
             });
         }

@@ -12,6 +12,7 @@ mod library_view;
 mod media_controls;
 mod memory;
 mod player_view;
+mod text_edit;
 mod theme;
 mod up_next;
 mod updates;
@@ -79,13 +80,20 @@ impl Root {
         // Tear down any previous session before creating a new video window.
         self.player = None;
         let settings = self.library.read(cx).settings().clone();
-        // A show remembers the tracks last picked while watching it.
-        let prefs = request
+        // A file brings back the exact tracks it was last watched with; failing that, a show
+        // brings back the language and variant last picked for its episodes.
+        let (prefs, file_prefs) = request
             .file_id
             .map(|id| self.library.read(cx).track_prefs(id))
             .unwrap_or_default();
+        let file_subtitle = file_prefs
+            .subtitle_track
+            .filter(|_| file_prefs.subtitles_on == Some(true));
         let options = PlaybackOptions {
-            subtitles: prefs.subtitles_on.unwrap_or(settings.subtitles_by_default),
+            subtitles: file_prefs
+                .subtitles_on
+                .or(prefs.subtitles_on)
+                .unwrap_or(settings.subtitles_by_default),
             audio_channels: match settings.audio_output {
                 AudioOutput::Stereo => AudioChannels::Stereo,
                 AudioOutput::Source => AudioChannels::Source,
@@ -99,11 +107,16 @@ impl Root {
                 .subtitle_lang
                 .clone()
                 .or_else(|| settings.subtitle_language.clone()),
-            // Track ids only stand in for choices whose tracks had no language tag.
-            audio_track: prefs.audio_track.filter(|_| prefs.audio_lang.is_none()),
-            subtitle_track: prefs
+            // A show's track ids only stand in for choices whose tracks had no language tag
+            // (ids differ between episodes); a file's own ids are exact.
+            audio_track: file_prefs
+                .audio_track
+                .or(prefs.audio_track.filter(|_| prefs.audio_lang.is_none())),
+            subtitle_track: file_subtitle.or(prefs
                 .subtitle_track
-                .filter(|_| prefs.subtitle_lang.is_none()),
+                .filter(|_| prefs.subtitle_lang.is_none())),
+            audio_title: prefs.audio_title.clone(),
+            subtitle_title: prefs.subtitle_title.clone(),
             volume: settings.volume,
             subtitle_scale_pct: (settings.subtitle_size.scale() * 100.).round() as u32,
         };
@@ -148,11 +161,13 @@ impl Root {
                     file_id,
                     kind,
                     lang,
+                    title,
                     id,
                 } => {
-                    let (file_id, kind, lang, id) = (*file_id, *kind, lang.clone(), *id);
+                    let (file_id, kind, id) = (*file_id, *kind, *id);
+                    let (lang, title) = (lang.clone(), title.clone());
                     this.library.update(cx, |lib, _| {
-                        lib.remember_track(file_id, kind, lang.as_deref(), id)
+                        lib.remember_track(file_id, kind, lang.as_deref(), title.as_deref(), id)
                     });
                 }
                 PlayerEvent::PlayNext(next) => {

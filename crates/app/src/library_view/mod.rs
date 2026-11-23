@@ -33,19 +33,25 @@ use crate::theme::{self, glass_button, icon, primary_button, round_button};
 mod about;
 mod cards;
 mod cast;
+mod collections;
 mod detail;
 mod fix_match;
 mod grid;
 mod hero;
 mod home;
 mod menus;
+mod nav_order;
+mod poster_drag;
 mod search;
 mod settings_page;
 mod sidebar;
 
+use collections::{CardMenu, CollectionEdit};
 use detail::*;
 use grid::*;
 use menus::MenuEntry;
+use miru_core::collections::Collection;
+use poster_drag::{DropTarget, Landing, PosterDrag};
 use settings_page::*;
 
 const PAGE_PADDING: f32 = 48.;
@@ -178,6 +184,11 @@ enum Page {
         /// Episode the play button offers (see `Db::show_up_next`).
         up_next: Option<i64>,
     },
+    /// A collection's titles (those still in the library).
+    Collection {
+        id: i64,
+        items: Vec<LibraryItem>,
+    },
 }
 
 #[derive(Clone, PartialEq)]
@@ -301,13 +312,34 @@ pub struct LibraryView {
     fix_focus_pending: bool,
     /// Return focus to the library after the Fix match panel closes itself.
     fix_focus_restore: bool,
+    collections: Vec<Collection>,
+    collection_edit: Option<CollectionEdit>,
+    collection_focus: FocusHandle,
+    collection_focus_pending: bool,
+    /// A collection that just received a title, and when (its sidebar row glows).
+    collection_flash: Option<(i64, Instant)>,
+    collection_flash_epoch: usize,
+    /// A collection whose delete is waiting for confirmation.
+    collection_delete: Option<i64>,
+    card_menu: Option<CardMenu>,
+    card_menu_closed: Instant,
+    poster_drag: Option<PosterDrag>,
+    poster_press_epoch: usize,
+    poster_drag_ended: Option<Instant>,
+    drop_target: Option<DropTarget>,
+    landing: Option<Landing>,
+    landing_epoch: usize,
+    nav_drag: Option<nav_order::NavDrag>,
+    /// Sidebar-order rows' eased offsets while reordering.
+    nav_shift: Vec<f32>,
+    nav_frame: Instant,
     /// Watches the library folders; a change while a scan runs queues another one.
     folder_watch: Option<crate::folder_watch::FolderWatch>,
     rescan_pending: bool,
     /// Update check and install progress (Settings → About).
     update: about::UpdateState,
     /// TMDB key being typed in Settings, and its field's focus.
-    key_draft: Option<String>,
+    key_draft: Option<crate::text_edit::TextEdit>,
     key_focus: FocusHandle,
     key_focus_pending: bool,
     recent: Vec<LibraryItem>,
@@ -345,7 +377,7 @@ pub struct LibraryView {
     search_query: String,
     /// Floating search panel: whether it is open and the text being typed into it.
     search_overlay: bool,
-    search_draft: String,
+    search_draft: crate::text_edit::TextEdit,
     /// Highlighted row in the panel's live results.
     search_selected: usize,
     search_focus: FocusHandle,
@@ -419,6 +451,24 @@ impl LibraryView {
             fix_focus: cx.focus_handle(),
             fix_focus_pending: false,
             fix_focus_restore: false,
+            collections: Vec::new(),
+            collection_edit: None,
+            collection_focus: cx.focus_handle(),
+            collection_focus_pending: false,
+            collection_flash: None,
+            collection_flash_epoch: 0,
+            collection_delete: None,
+            card_menu: None,
+            card_menu_closed: Instant::now(),
+            poster_drag: None,
+            poster_press_epoch: 0,
+            poster_drag_ended: None,
+            drop_target: None,
+            landing: None,
+            landing_epoch: 0,
+            nav_drag: None,
+            nav_shift: Vec::new(),
+            nav_frame: Instant::now(),
             folder_watch: None,
             rescan_pending: false,
             update: Default::default(),
@@ -450,7 +500,7 @@ impl LibraryView {
             confirm_remove: None,
             search_query: String::new(),
             search_overlay: false,
-            search_draft: String::new(),
+            search_draft: crate::text_edit::TextEdit::new(""),
             search_selected: 0,
             search_focus: cx.focus_handle(),
             search_focus_pending: false,
@@ -531,7 +581,7 @@ impl LibraryView {
         self.reload();
         self.fill_continue_art(cx);
         let result = match &mut self.page {
-            Page::Browse(_) | Page::Settings => Ok(()),
+            Page::Browse(_) | Page::Settings | Page::Collection { .. } => Ok(()),
             Page::Movie { item, progress } => self.db.progress(item.file_id).map(|p| *progress = p),
             Page::Show {
                 item,
@@ -569,6 +619,7 @@ impl LibraryView {
             recent.truncate(RECENT_LIMIT as usize);
             self.recent = recent;
             self.continue_cards = self.build_continue_cards()?;
+            self.reload_collections();
             self.roots = self.db.root_stats()?;
             self.history = self.db.watch_history(HISTORY_LIMIT)?;
             self.root_count = self.roots.len();
@@ -967,6 +1018,8 @@ impl LibraryView {
         self.close_genre_menu();
         self.cast_pane = None;
         self.close_more_menu();
+        self.close_card_menu();
+        self.collection_delete = None;
         let same_tab = matches!((&self.page, &page), (Page::Browse(a), Page::Browse(b)) if a == b);
         if !same_tab {
             let previous = std::mem::replace(&mut self.page, page);
@@ -1177,6 +1230,9 @@ impl LibraryView {
 
     /// Follows a shelf drag: the row moves with the pointer, clamped to its ends.
     fn drag_shelf(&mut self, event: &gpui::MouseMoveEvent, cx: &mut Context<Self>) {
+        if self.poster_dragging() {
+            return;
+        }
         let Some(drag) = &mut self.shelf_drag else {
             return;
         };
@@ -1250,6 +1306,7 @@ impl LibraryView {
             || self
                 .shelf_drag_ended
                 .is_some_and(|t| t.elapsed() < Duration::from_millis(250))
+            || self.click_ends_poster_drag()
     }
     fn set_hover(&mut self, id: &SharedString, hovered: bool, cx: &mut Context<Self>) {
         let touches_hero =
@@ -1310,6 +1367,14 @@ impl LibraryView {
             "escape" if self.cast_pane.is_some() => self.cast_back(cx),
             "escape" if self.more_menu => {
                 self.close_more_menu();
+                cx.notify();
+            }
+            "escape" if self.card_menu.is_some() => {
+                self.close_card_menu();
+                cx.notify();
+            }
+            "escape" if self.collection_delete.is_some() => {
+                self.collection_delete = None;
                 cx.notify();
             }
             "backspace" | "escape" => self.go_back(cx),
@@ -1418,6 +1483,13 @@ impl Render for LibraryView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let render_started = Instant::now();
         self.step_shelf_glide(window);
+        self.step_poster_drag(window);
+        if matches!(self.page, Page::Settings) {
+            self.step_nav_order(window);
+        }
+        if std::mem::take(&mut self.collection_focus_pending) {
+            window.focus(&self.collection_focus, cx);
+        }
         if self.search_focus_pending {
             self.search_focus_pending = false;
             window.focus(&self.search_focus, cx);
@@ -1453,6 +1525,10 @@ impl Render for LibraryView {
                     window,
                     cx,
                 ),
+                Page::Collection { id, items } => {
+                    let (id, items) = (*id, items.clone());
+                    self.render_collection(id, &items, window, cx)
+                }
                 Page::Movie { item, progress } => {
                     let (item, progress) = (item.clone(), *progress);
                     self.render_movie(&item, progress, window, cx)
@@ -1517,12 +1593,18 @@ impl Render for LibraryView {
                 cx.listener(|this, _, _, cx| this.go_forward(cx)),
             )
             // Shelf drags: follow the pointer anywhere in the window, end on release.
-            .on_mouse_move(
-                cx.listener(|this, event: &gpui::MouseMoveEvent, _, cx| this.drag_shelf(event, cx)),
-            )
+            .on_mouse_move(cx.listener(|this, event: &gpui::MouseMoveEvent, _, cx| {
+                this.drag_shelf(event, cx);
+                this.drag_poster(event, cx);
+                this.drag_nav(event, cx);
+            }))
             .on_mouse_up(
                 gpui::MouseButton::Left,
-                cx.listener(|this, _, _, cx| this.end_shelf_drag(cx)),
+                cx.listener(|this, _, _, cx| {
+                    this.end_shelf_drag(cx);
+                    this.end_poster_drag(cx);
+                    this.end_nav_drag(cx);
+                }),
             )
             // Re-render on scroll so the nav backdrop follows the scroll position.
             .on_scroll(cx.listener(|_, _, _, cx| cx.notify()))
@@ -1541,7 +1623,9 @@ impl Render for LibraryView {
             )
             .children(overlay)
             .child(self.render_cast_pane(cx))
-            .child(self.render_fix_match(window, cx));
+            .child(self.render_fix_match(window, cx))
+            .child(self.render_card_menu(cx))
+            .child(self.render_poster_drag());
         // Building the element tree should take a few milliseconds; report slow frames.
         let took = render_started.elapsed();
         if took > SLOW_RENDER {

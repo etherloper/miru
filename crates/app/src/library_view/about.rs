@@ -4,6 +4,7 @@ use crate::config::KeySource;
 use crate::updates::{self, Release, Version};
 
 use super::*;
+use crate::text_edit::{self, KeyOutcome, TextEdit};
 
 /// Where an update stands.
 #[derive(Clone, PartialEq, Default)]
@@ -63,7 +64,7 @@ impl LibraryView {
     }
 
     fn start_key_edit(&mut self, cx: &mut Context<Self>) {
-        self.key_draft = Some(String::new());
+        self.key_draft = Some(TextEdit::secret());
         self.key_focus_pending = true;
         cx.notify();
     }
@@ -72,7 +73,7 @@ impl LibraryView {
         let Some(draft) = self.key_draft.take() else {
             return;
         };
-        let key = draft.trim().to_string();
+        let key = draft.text().trim().to_string();
         if !key.is_empty() {
             self.update_settings(|s| s.tmdb_key = Some(key), cx);
             self.apply_tmdb_key(cx);
@@ -95,7 +96,6 @@ impl LibraryView {
             return;
         };
         let k = &event.keystroke;
-        let command = k.modifiers.control || k.modifiers.platform;
         match k.key.as_str() {
             "enter" => {
                 self.save_key(cx);
@@ -105,20 +105,11 @@ impl LibraryView {
                 self.key_draft = None;
                 window.focus(&self.focus, cx);
             }
-            "backspace" if command => draft.clear(),
-            "backspace" => {
-                draft.pop();
-            }
-            "v" if command => {
-                if let Some(text) = cx.read_from_clipboard().and_then(|c| c.text()) {
-                    draft.extend(text.chars().filter(|c| !c.is_whitespace()));
+            _ => {
+                if draft.handle_key(k, cx) == KeyOutcome::Unhandled {
+                    return;
                 }
             }
-            _ if command || k.modifiers.alt => return,
-            _ => match &k.key_char {
-                Some(typed) if !typed.chars().any(char::is_whitespace) => draft.push_str(typed),
-                _ => return,
-            },
         }
         cx.stop_propagation();
         cx.notify();
@@ -134,92 +125,88 @@ impl LibraryView {
                  from your folders only. Keys are free at themoviedb.org."
             }
         };
-        let control: AnyElement =
-            match &self.key_draft {
-                Some(draft) => {
-                    let focused = self.key_focus.is_focused(window);
-                    // Shown masked: it is a secret, even if only an API key.
-                    let masked: String = draft.chars().map(|_| '•').collect();
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .child(
-                            div()
-                                .id("tmdb-key-field")
-                                .track_focus(&self.key_focus)
-                                .on_key_down(cx.listener(Self::on_key_field_key))
-                                .w(px(240.))
-                                .h(px(36.))
-                                .px_3()
-                                .flex()
-                                .items_center()
-                                .rounded(px(8.))
-                                .bg(rgba(0xffffff0d))
-                                .border_1()
-                                .border_color(if focused {
-                                    rgba(0xffffff4d)
-                                } else {
-                                    theme::glass_border()
-                                })
-                                .text_sm()
-                                .overflow_hidden()
-                                .cursor_text()
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    window.focus(&this.key_focus, cx)
-                                }))
-                                .child(if draft.is_empty() {
-                                    div()
-                                        .text_color(theme::text_tertiary())
-                                        .child("Paste your key")
-                                        .into_any_element()
-                                } else {
-                                    div().truncate().child(masked).into_any_element()
-                                }),
-                        )
-                        .child(small_button(
-                            "tmdb-key-save",
-                            "Save",
-                            false,
-                            cx.listener(|this, _, window, cx| {
-                                this.save_key(cx);
-                                window.focus(&this.focus, cx);
-                            }),
-                        ))
-                        .child(small_button(
-                            "tmdb-key-cancel",
-                            "Cancel",
-                            false,
-                            cx.listener(|this, _, _, cx| {
-                                this.key_draft = None;
-                                cx.notify();
-                            }),
-                        ))
-                        .into_any_element()
-                }
-                None => div()
+        let control: AnyElement = match &self.key_draft {
+            Some(draft) => {
+                let focused = self.key_focus.is_focused(window);
+                div()
                     .flex()
+                    .items_center()
                     .gap_2()
-                    .child(small_button(
-                        "tmdb-key-edit",
-                        if self.settings.tmdb_key.is_some() {
-                            "Change key"
-                        } else {
-                            "Add key"
-                        },
-                        false,
-                        cx.listener(|this, _, _, cx| this.start_key_edit(cx)),
+                    .child(text_edit::mouse_handlers(
+                        div()
+                            .id("tmdb-key-field")
+                            .track_focus(&self.key_focus)
+                            .on_key_down(cx.listener(Self::on_key_field_key))
+                            .w(px(240.))
+                            .h(px(36.))
+                            .px_3()
+                            .flex()
+                            .items_center()
+                            .rounded(px(8.))
+                            .bg(rgba(0xffffff0d))
+                            .border_1()
+                            .border_color(if focused {
+                                rgba(0xffffff4d)
+                            } else {
+                                theme::glass_border()
+                            })
+                            .text_sm()
+                            .overflow_hidden()
+                            .cursor_text()
+                            // Shown masked: it is a secret, even if only an API key.
+                            .child(draft.element(
+                                "Paste your key",
+                                theme::text(),
+                                theme::text_tertiary(),
+                                focused,
+                            )),
+                        &self.key_focus,
+                        |this: &mut Self| this.key_draft.as_mut(),
+                        cx,
                     ))
-                    .when(self.settings.tmdb_key.is_some(), |d| {
-                        d.child(small_button(
-                            "tmdb-key-remove",
-                            "Remove",
-                            false,
-                            cx.listener(|this, _, _, cx| this.remove_key(cx)),
-                        ))
-                    })
-                    .into_any_element(),
-            };
+                    .child(small_button(
+                        "tmdb-key-save",
+                        "Save",
+                        false,
+                        cx.listener(|this, _, window, cx| {
+                            this.save_key(cx);
+                            window.focus(&this.focus, cx);
+                        }),
+                    ))
+                    .child(small_button(
+                        "tmdb-key-cancel",
+                        "Cancel",
+                        false,
+                        cx.listener(|this, _, _, cx| {
+                            this.key_draft = None;
+                            cx.notify();
+                        }),
+                    ))
+                    .into_any_element()
+            }
+            None => div()
+                .flex()
+                .gap_2()
+                .child(small_button(
+                    "tmdb-key-edit",
+                    if self.settings.tmdb_key.is_some() {
+                        "Change key"
+                    } else {
+                        "Add key"
+                    },
+                    false,
+                    cx.listener(|this, _, _, cx| this.start_key_edit(cx)),
+                ))
+                .when(self.settings.tmdb_key.is_some(), |d| {
+                    d.child(small_button(
+                        "tmdb-key-remove",
+                        "Remove",
+                        false,
+                        cx.listener(|this, _, _, cx| this.remove_key(cx)),
+                    ))
+                })
+                .into_any_element(),
+        };
         vec![setting_row("TMDB key", Some(description), Some(control)).into_any_element()]
     }
 
@@ -407,37 +394,111 @@ impl LibraryView {
         .detach();
     }
 
-    /// Update rows for About: status with the next action, and automatic checks.
-    pub(super) fn update_rows(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
-        if updates::UPDATE_REPO.is_none() {
-            return vec![
-                setting_row(
-                    "Updates",
-                    Some("This build isn't set up to check for updates."),
-                    None,
+    /// The About card: the app with its version, the update status, and links, in a compact
+    /// layout (header, update row, auto-check, links and small print).
+    pub(super) fn about_rows(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let header = div()
+            .flex()
+            .items_center()
+            .gap_4()
+            .px_5()
+            .py_4()
+            .bg(rgba(0xffffff05))
+            .border_b_1()
+            .border_color(theme::glass_border())
+            .child(
+                // The app icon: the ensō, white on black.
+                div()
+                    .size(px(44.))
+                    .flex_shrink_0()
+                    .rounded(px(11.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .bg(rgba(0x000000ff))
+                    .border_1()
+                    .border_color(theme::glass_border())
+                    .child(icon("icons/enso.svg", 26., theme::text())),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .gap_0p5()
+                    .child(
+                        div()
+                            .flex()
+                            .items_baseline()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .font_family(theme::FONT_DISPLAY)
+                                    .text_size(px(17.))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child("Miru"),
+                            )
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(theme::text_tertiary())
+                                    .child(concat!("v", env!("CARGO_PKG_VERSION"))),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(theme::text_secondary())
+                            .child("A local media player for your movies and shows."),
+                    ),
+            );
+
+        let mut rows = vec![header.into_any_element(), self.update_status_row(cx)];
+        if updates::UPDATE_REPO.is_some() {
+            let auto = toggle(
+                "update-auto",
+                self.settings.auto_update,
+                cx.listener(|this, _, _, cx| this.update_settings(|s| s.auto_update ^= true, cx)),
+            );
+            rows.push(
+                compact_row(
+                    "Check automatically",
+                    "When Miru starts, at most once a day.",
+                    Some(auto.into_any_element()),
                 )
                 .into_any_element(),
-            ];
+            );
+        }
+        rows.push(self.about_links());
+        rows
+    }
+
+    /// The update status with whatever it offers: a refresh or download icon, a progress bar
+    /// while downloading, or "Install and restart".
+    fn update_status_row(&self, cx: &mut Context<Self>) -> AnyElement {
+        if updates::UPDATE_REPO.is_none() {
+            return compact_row("Updates", "This build doesn't check for updates.", None)
+                .into_any_element();
         }
         let current = Version::current();
-        let (description, control): (String, Option<AnyElement>) = match &self.update {
-            UpdateState::Idle => (format!("You have version {current}."), None),
-            UpdateState::Checking => ("Checking for updates…".into(), None),
-            UpdateState::UpToDate => (format!("Version {current} is the latest."), None),
+        let checked = last_checked(self.settings.update_checked_at);
+        let (title, detail, control): (String, String, Option<AnyElement>) = match &self.update {
+            UpdateState::Idle => ("Updates".into(), checked, None),
+            UpdateState::Checking => (
+                "Checking for updates…".into(),
+                "Asking GitHub for the latest release.".into(),
+                None,
+            ),
+            UpdateState::UpToDate => ("You're up to date".into(), checked, None),
             UpdateState::Available(release) => (
-                format!(
-                    "Version {} is available (you have {current}).{}",
-                    release.version,
-                    notes_suffix(&release.notes)
-                ),
+                format!("Version {} is available", release.version),
+                first_line(&release.notes).unwrap_or_else(|| format!("You have {current}.")),
                 None,
             ),
             UpdateState::Downloading { release, progress } => (
-                format!(
-                    "Downloading version {}… {}%",
-                    release.version,
-                    (progress * 100.).round()
-                ),
+                format!("Downloading version {}", release.version),
+                format!("{}%", (progress * 100.).round()),
                 Some(
                     div()
                         .w(px(140.))
@@ -446,10 +507,8 @@ impl LibraryView {
                 ),
             ),
             UpdateState::Ready { release, .. } => (
-                format!(
-                    "Version {} is ready. Miru will close, update and reopen.",
-                    release.version
-                ),
+                format!("Version {} is ready", release.version),
+                "Miru will close, update and reopen.".into(),
                 Some(
                     primary_button(
                         "update-install",
@@ -460,32 +519,103 @@ impl LibraryView {
                     .into_any_element(),
                 ),
             ),
-            UpdateState::Failed(message) => (message.to_string(), None),
-            UpdateState::DownloadFailed { message, .. } => (message.to_string(), None),
+            UpdateState::Failed(message) => (
+                "Couldn't check for updates".into(),
+                message.to_string(),
+                None,
+            ),
+            UpdateState::DownloadFailed { message, .. } => {
+                ("The download failed".into(), message.to_string(), None)
+            }
         };
-        // The refresh button sits beside whatever the row offers, except mid-check or download.
-        let control = div()
+        let controls = div()
             .flex()
             .items_center()
             .gap_3()
             .children(control)
             .children(self.update_icon_button(cx))
             .into_any_element();
-        let control = Some(control);
-        let auto = toggle(
-            "update-auto",
-            self.settings.auto_update,
-            cx.listener(|this, _, _, cx| this.update_settings(|s| s.auto_update ^= true, cx)),
-        );
-        vec![
-            setting_row("Updates", Some(&description), control).into_any_element(),
-            setting_row(
-                "Check automatically",
-                Some("Look for a new version when Miru starts, at most once a day."),
-                Some(auto.into_any_element()),
+        compact_row(&title, &detail, Some(controls)).into_any_element()
+    }
+
+    /// Links to the project, the data folder, and the small print.
+    fn about_links(&self) -> AnyElement {
+        let chip = |id: &'static str, label: &'static str| {
+            div()
+                .id(id)
+                .tab_index(0)
+                .focus_visible(theme::focus_ring)
+                .h(px(28.))
+                .px_3()
+                .flex()
+                .items_center()
+                .rounded_full()
+                .border_1()
+                .border_color(theme::glass_border())
+                .text_xs()
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(theme::text_secondary())
+                .cursor_pointer()
+                .hover(|s| s.bg(theme::glass_hover()).text_color(theme::text()))
+                .child(label)
+        };
+        let url_chip = |id: &'static str, label: &'static str, url: String| {
+            chip(id, label).on_click(move |_, _, cx| cx.open_url(&url))
+        };
+        let data_dir = self.paths.db.parent().map(std::path::Path::to_path_buf);
+        let data_label = data_dir
+            .as_ref()
+            .map(|d| format!("Data: {}", d.display()))
+            .unwrap_or_default();
+        let repo = updates::UPDATE_REPO.map(|r| format!("https://github.com/{r}"));
+        div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .px_5()
+            .py_4()
+            .child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .gap_2()
+                    .when_some(repo, |d, repo| {
+                        d.child(url_chip("about-github", "GitHub", repo.clone()))
+                            .child(url_chip(
+                                "about-releases",
+                                "Release notes",
+                                format!("{repo}/releases"),
+                            ))
+                            .child(url_chip(
+                                "about-issues",
+                                "Report a problem",
+                                format!("{repo}/issues"),
+                            ))
+                    })
+                    .child(
+                        chip("about-data", "Open data folder").on_click(move |_, _, cx| {
+                            if let Some(dir) = &data_dir {
+                                cx.reveal_path(dir);
+                            }
+                        }),
+                    ),
             )
-            .into_any_element(),
-        ]
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .text_xs()
+                    .text_color(theme::text_tertiary())
+                    .child("GPL-3.0 License · © 2026 etherloper")
+                    .child(data_label)
+                    // TMDB requires apps using its API to say so.
+                    .child(
+                        "Posters, artwork and details come from TMDB. This product uses the TMDB \
+                         API but is not endorsed or certified by TMDB.",
+                    ),
+            )
+            .into_any_element()
     }
 
     /// The borderless icon beside the update status: refresh to check for a new version, or a
@@ -525,27 +655,68 @@ impl LibraryView {
     }
 }
 
-/// The first line of release notes, appended to the update status.
-fn notes_suffix(notes: &str) -> String {
+/// The first non-empty line of release notes.
+fn first_line(notes: &str) -> Option<String> {
     notes
         .lines()
         .map(str::trim)
         .find(|l| !l.is_empty())
-        .map(|line| format!(" {line}"))
-        .unwrap_or_default()
+        .map(str::to_string)
 }
 
-/// TMDB requires apps using its API to say so.
-pub(super) fn attribution_row() -> AnyElement {
-    setting_row(
-        "Metadata",
-        Some(
-            "Posters, artwork and details come from TMDB. This product uses the TMDB API but is \
-             not endorsed or certified by TMDB.",
-        ),
-        None,
-    )
-    .into_any_element()
+/// "Last checked 3 hours ago." from a unix time (0 = never).
+fn last_checked(at: i64) -> String {
+    if at <= 0 {
+        return "Not checked yet.".into();
+    }
+    let secs = (unix_now() - at).max(0);
+    let ago = match secs {
+        0..60 => "just now".to_string(),
+        60..3600 => plural(secs / 60, "minute"),
+        3600..86_400 => plural(secs / 3600, "hour"),
+        _ => plural(secs / 86_400, "day"),
+    };
+    format!("Last checked {ago}.")
+}
+
+fn plural(n: i64, unit: &str) -> String {
+    if n == 1 {
+        format!("1 {unit} ago")
+    } else {
+        format!("{n} {unit}s ago")
+    }
+}
+
+/// A tighter settings row: label and one line of detail, with an optional control.
+fn compact_row(label: &str, detail: &str, control: Option<AnyElement>) -> impl IntoElement {
+    div()
+        .flex()
+        .items_center()
+        .gap_6()
+        .px_5()
+        .py_3()
+        .border_b_1()
+        .border_color(theme::glass_border())
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .child(
+                    div()
+                        .text_sm()
+                        .font_weight(FontWeight::MEDIUM)
+                        .child(label.to_string()),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(theme::text_secondary())
+                        .child(detail.to_string()),
+                ),
+        )
+        .children(control)
 }
 
 fn unix_now() -> i64 {

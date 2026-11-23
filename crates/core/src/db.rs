@@ -171,6 +171,36 @@ const MIGRATIONS: &[&str] = &[
     -- checked against TMDB and never asked again. Ask once more for any without TMDB details.
     UPDATE episode_art SET tmdb_checked = 0 WHERE source != 'tmdb';
 ",
+    r"
+    -- Track titles (e.g. 'SDH', 'Forced') tell apart tracks in the same language.
+    ALTER TABLE show_track_prefs ADD COLUMN audio_title TEXT;
+    ALTER TABLE show_track_prefs ADD COLUMN subtitle_title TEXT;
+    -- The exact tracks last used for a file, so resuming it brings them back.
+    CREATE TABLE file_track_prefs (
+        file_id         INTEGER PRIMARY KEY REFERENCES media_files(id) ON DELETE CASCADE,
+        audio_track     INTEGER,
+        subtitles_on    INTEGER,
+        subtitle_track  INTEGER
+    );
+",
+    r"
+    -- Collections: named lists of titles, in the sidebar. Titles are keyed like matches
+    -- (kind, title, year with 0 for none), so they survive rescans.
+    CREATE TABLE collections (
+        id          INTEGER PRIMARY KEY,
+        name        TEXT NOT NULL,
+        position    INTEGER NOT NULL,
+        created_at  INTEGER NOT NULL
+    );
+    CREATE TABLE collection_items (
+        collection_id  INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+        kind           TEXT NOT NULL,
+        title          TEXT NOT NULL COLLATE NOCASE,
+        year           INTEGER NOT NULL,
+        added_at       INTEGER NOT NULL,
+        PRIMARY KEY (collection_id, kind, title, year)
+    );
+",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]

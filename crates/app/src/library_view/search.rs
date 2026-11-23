@@ -1,6 +1,7 @@
 //! Search: the floating Ctrl+K panel and the full results page.
 
 use super::*;
+use crate::text_edit::{self, KeyOutcome};
 
 impl LibraryView {
     /// Opens the floating search panel.
@@ -38,7 +39,7 @@ impl LibraryView {
     }
 
     pub(super) fn open_hit(&mut self, hit: SearchHit, window: &mut Window, cx: &mut Context<Self>) {
-        self.search_query = self.search_draft.trim().to_string();
+        self.search_query = self.search_draft.text().trim().to_string();
         self.close_search(window, cx);
         match hit {
             SearchHit::Title(item) => self.open(&item, cx),
@@ -65,7 +66,7 @@ impl LibraryView {
 
     /// Shows every match for the drafted query on the full results page.
     pub(super) fn submit_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let query = self.search_draft.trim().to_string();
+        let query = self.search_draft.text().trim().to_string();
         if query.is_empty() {
             return;
         }
@@ -86,7 +87,6 @@ impl LibraryView {
         let k = &event.keystroke;
         let command = k.modifiers.control || k.modifiers.platform;
         let hits = self.search_hits();
-        let before = self.search_draft.clone();
         match k.key.as_str() {
             "enter" => {
                 match hits.into_iter().nth(self.search_selected) {
@@ -106,37 +106,15 @@ impl LibraryView {
                 self.search_selected = (self.search_selected + 1).min(hits.len().saturating_sub(1))
             }
             "up" => self.search_selected = self.search_selected.saturating_sub(1),
-            "backspace" if command => {
-                let draft = &mut self.search_draft;
-                let trimmed = draft.trim_end().len();
-                let cut = draft[..trimmed].rfind(' ').map_or(0, |i| i + 1);
-                draft.truncate(cut);
-            }
-            "backspace" => {
-                self.search_draft.pop();
-            }
-            "v" if command => {
-                if let Some(text) = cx.read_from_clipboard().and_then(|c| c.text()) {
-                    let clean: String = text
-                        .chars()
-                        .map(|c| if c.is_control() { ' ' } else { c })
-                        .collect();
-                    self.search_draft.push_str(clean.trim());
+            _ => match self.search_draft.handle_key(k, cx) {
+                KeyOutcome::Changed => {
+                    let draft = self.search_draft.text().to_string();
+                    self.run_search(&draft);
+                    self.search_selected = 0;
                 }
-            }
-            _ if command || k.modifiers.alt => {}
-            _ => {
-                if let Some(typed) = &k.key_char
-                    && !typed.chars().any(char::is_control)
-                {
-                    self.search_draft.push_str(typed);
-                }
-            }
-        }
-        if self.search_draft != before {
-            let draft = self.search_draft.clone();
-            self.run_search(&draft);
-            self.search_selected = 0;
+                KeyOutcome::Moved => {}
+                KeyOutcome::Unhandled => return,
+            },
         }
         cx.notify();
         cx.stop_propagation();
@@ -362,56 +340,40 @@ impl LibraryView {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let focused = self.search_focus.is_focused(window);
-        let draft = self.search_draft.clone();
+        let draft = self.search_draft.text().to_string();
         let empty = draft.trim().is_empty();
         let hits = self.search_hits();
-        let caret = || {
-            div()
-                .flex_shrink_0()
-                .w(px(2.))
-                .h(px(20.))
-                .rounded_full()
-                .bg(theme::text())
-                .with_animation(
-                    "search-caret",
-                    Animation::new(Duration::from_millis(1060)).repeat(),
-                    |el, t| el.opacity(if t < 0.55 { 1. } else { 0. }),
-                )
-        };
 
-        let field = div()
-            .h(px(56.))
-            .px_5()
-            .flex()
-            .items_center()
-            .gap_3()
-            .cursor_text()
-            .child(icon("icons/search.svg", 18., theme::text_tertiary()))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .flex()
-                    .items_center()
-                    .text_size(px(17.))
-                    .when(draft.is_empty(), |d| {
-                        d.when(focused, |d| d.child(caret())).child(
-                            div()
-                                .text_color(theme::text_tertiary())
-                                .child("Search movies, shows and episodes"),
-                        )
-                    })
-                    .when(!draft.is_empty(), |d| {
-                        d.child(div().truncate().child(draft.clone()))
-                            .when(focused, |d| d.child(caret()))
-                    }),
-            )
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(theme::text_tertiary())
-                    .child("Esc"),
-            );
+        let field =
+            div()
+                .id("search-field")
+                .h(px(56.))
+                .px_5()
+                .flex()
+                .items_center()
+                .gap_3()
+                .cursor_text()
+                .child(icon("icons/search.svg", 18., theme::text_tertiary()))
+                .child(div().flex_1().min_w_0().text_size(px(17.)).child(
+                    self.search_draft.element(
+                        "Search movies, shows and episodes",
+                        theme::text(),
+                        theme::text_tertiary(),
+                        focused,
+                    ),
+                ))
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(theme::text_tertiary())
+                        .child("Esc"),
+                );
+        let field = text_edit::mouse_handlers(
+            field,
+            &self.search_focus,
+            |this: &mut Self| Some(&mut this.search_draft),
+            cx,
+        );
 
         let results: Option<AnyElement> = (!empty).then(|| {
             if hits.is_empty() {

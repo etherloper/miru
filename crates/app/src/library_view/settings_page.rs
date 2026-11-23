@@ -1,7 +1,7 @@
 //! Settings page and the form controls it is built from.
 
 use super::*;
-use miru_core::tracks::TrackPrefs;
+use miru_core::tracks::{FileTrackPrefs, TrackPrefs};
 use miru_player::TrackKind;
 
 /// Languages offered for preferred audio and subtitles: (label, ISO 639-1 code).
@@ -38,33 +38,51 @@ impl LibraryView {
         }
     }
 
-    /// Tracks last picked for the show `file_id` belongs to (nothing for movies).
-    pub fn track_prefs(&self, file_id: i64) -> TrackPrefs {
-        self.show_of(file_id)
+    /// Tracks last picked for the show `file_id` belongs to (nothing for movies), and the
+    /// exact tracks last used for the file itself.
+    pub fn track_prefs(&self, file_id: i64) -> (TrackPrefs, FileTrackPrefs) {
+        let show = self
+            .show_of(file_id)
             .and_then(|show| {
                 self.db
                     .show_track_prefs(&show)
                     .inspect_err(|e| tracing::error!("reading track choices: {e}"))
                     .ok()
             })
-            .unwrap_or_default()
+            .unwrap_or_default();
+        let file = self
+            .db
+            .file_track_prefs(file_id)
+            .inspect_err(|e| tracing::error!("reading track choices: {e}"))
+            .unwrap_or_default();
+        (show, file)
     }
 
-    /// Remembers a track picked while watching an episode, for the show's other episodes.
+    /// Remembers a track picked while watching: for this file (to resume with it) and, for
+    /// an episode, for the show's other episodes.
     pub fn remember_track(
         &mut self,
         file_id: i64,
         kind: TrackKind,
         lang: Option<&str>,
+        title: Option<&str>,
         id: Option<i64>,
     ) {
+        let saved = match (kind, id) {
+            (TrackKind::Audio, Some(id)) => self.db.set_file_audio(file_id, id),
+            (TrackKind::Audio, None) => Ok(()),
+            (TrackKind::Subtitle, id) => self.db.set_file_subtitles(file_id, id),
+        };
+        if let Err(e) = saved {
+            tracing::error!("saving track choice: {e}");
+        }
         let Some(show) = self.show_of(file_id) else {
             return;
         };
         let saved = match (kind, id) {
-            (TrackKind::Audio, Some(id)) => self.db.set_show_audio(&show, lang, id),
+            (TrackKind::Audio, Some(id)) => self.db.set_show_audio(&show, lang, title, id),
             (TrackKind::Audio, None) => Ok(()),
-            (TrackKind::Subtitle, id) => self.db.set_show_subtitles(&show, lang, id),
+            (TrackKind::Subtitle, id) => self.db.set_show_subtitles(&show, lang, title, id),
         };
         if let Err(e) = saved {
             tracing::error!("saving track choice: {e}");
@@ -112,54 +130,6 @@ impl LibraryView {
             self.show_error(format!("Could not save settings: {e}"), cx);
         }
         cx.notify();
-    }
-
-    /// One row per sidebar destination, with buttons to move it up or down.
-    fn sidebar_order_rows(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
-        let order = &self.settings.sidebar_order;
-        let last = order.len().saturating_sub(1);
-        order
-            .iter()
-            .enumerate()
-            .map(|(ix, item)| {
-                let mover = |up: bool, cx: &mut Context<Self>| {
-                    let (id, icon_path, enabled, tip) = if up {
-                        ("nav-order-up", "icons/chevron-up.svg", ix > 0, "Move up")
-                    } else {
-                        (
-                            "nav-order-down",
-                            "icons/chevron-down.svg",
-                            ix < last,
-                            "Move down",
-                        )
-                    };
-                    theme::icon_button(
-                        (id, ix),
-                        icon_path,
-                        30.,
-                        enabled,
-                        cx.listener(move |this, _, _, cx| this.move_nav_item(ix, up, cx)),
-                    )
-                    .when(enabled, |d| d.tooltip(theme::text_tooltip(tip)))
-                };
-                let controls = div()
-                    .flex()
-                    .items_center()
-                    .gap_1()
-                    .child(mover(true, cx))
-                    .child(mover(false, cx));
-                setting_row(item.label(), None, Some(controls.into_any_element()))
-                    .into_any_element()
-            })
-            .collect()
-    }
-
-    fn move_nav_item(&mut self, ix: usize, up: bool, cx: &mut Context<Self>) {
-        let len = self.settings.sidebar_order.len();
-        let target = if up { ix.checked_sub(1) } else { Some(ix + 1) };
-        if let Some(target) = target.filter(|t| *t < len && ix < len) {
-            self.update_settings(|s| s.sidebar_order.swap(ix, target), cx);
-        }
     }
 
     pub(super) fn remove_root(&mut self, root_id: i64, cx: &mut Context<Self>) {
@@ -305,23 +275,6 @@ impl LibraryView {
             }),
         );
 
-        // About.
-        let data_dir = self.paths.db.parent().map(std::path::Path::to_path_buf);
-        let data_label = data_dir
-            .as_ref()
-            .map(|d| d.display().to_string())
-            .unwrap_or_default();
-        let open_data = glass_button(
-            "open-data",
-            Some("icons/folder.svg"),
-            "Open",
-            move |_, _, cx| {
-                if let Some(dir) = &data_dir {
-                    cx.reveal_path(dir);
-                }
-            },
-        );
-
         let playback_rows = vec![
             setting_row(
                 "Skip interval",
@@ -382,22 +335,7 @@ impl LibraryView {
         let sidebar_rows = self.sidebar_order_rows(cx);
         let history_rows = self.history_rows(cx);
         let metadata_rows = self.metadata_rows(window, cx);
-        let mut about_rows = vec![
-            setting_row(
-                "Miru",
-                Some(concat!("Version ", env!("CARGO_PKG_VERSION"))),
-                None,
-            )
-            .into_any_element(),
-            setting_row(
-                "Data folder",
-                Some(&data_label),
-                Some(open_data.into_any_element()),
-            )
-            .into_any_element(),
-        ];
-        about_rows.extend(self.update_rows(cx));
-        about_rows.push(about::attribution_row());
+        let about_rows = self.about_rows(cx);
         folders.push(library_actions.into_any_element());
 
         div()
@@ -440,7 +378,7 @@ impl LibraryView {
                             .child(section("Home", "", home_rows))
                             .child(section(
                                 "Sidebar",
-                                "Choose the order of the sidebar. Settings always stays at the bottom.",
+                                "Drag to choose the order of the sidebar. Settings always stays at the bottom.",
                                 sidebar_rows,
                             ))
                             .child(section(

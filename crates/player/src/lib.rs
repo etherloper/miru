@@ -120,6 +120,10 @@ pub struct PlaybackOptions {
     /// language tag. Take precedence over the language preferences.
     pub audio_track: Option<i64>,
     pub subtitle_track: Option<i64>,
+    /// Track titles to prefer among tracks in the chosen language (e.g. "SDH" over
+    /// "Forced"), picked once the file's tracks are known.
+    pub audio_title: Option<String>,
+    pub subtitle_title: Option<String>,
 }
 
 impl Default for PlaybackOptions {
@@ -133,8 +137,18 @@ impl Default for PlaybackOptions {
             subtitle_scale_pct: 100,
             audio_track: None,
             subtitle_track: None,
+            audio_title: None,
+            subtitle_title: None,
         }
     }
+}
+
+/// A track to switch to once the file is loaded: same language and title.
+#[derive(Debug, Clone)]
+struct PreferredTrack {
+    kind: TrackKind,
+    lang: Option<String>,
+    title: String,
 }
 
 /// Snapshot of playback state, polled by the UI.
@@ -155,6 +169,8 @@ pub struct PlaybackState {
 
 pub struct Player {
     mpv: Mpv,
+    /// Track variants still to pick (see `apply_preferred_tracks`).
+    preferred: std::sync::Mutex<Vec<PreferredTrack>>,
 }
 
 impl Player {
@@ -196,7 +212,64 @@ impl Player {
             init.set_property("osd-level", 0i64)?;
             Ok(())
         })?;
-        Ok(Self { mpv })
+        let mut preferred = Vec::new();
+        if options.audio_track.is_none()
+            && let Some(title) = &options.audio_title
+        {
+            preferred.push(PreferredTrack {
+                kind: TrackKind::Audio,
+                lang: options.audio_language.clone(),
+                title: title.clone(),
+            });
+        }
+        if options.subtitles
+            && options.subtitle_track.is_none()
+            && let Some(title) = &options.subtitle_title
+        {
+            preferred.push(PreferredTrack {
+                kind: TrackKind::Subtitle,
+                lang: options.subtitle_language.clone(),
+                title: title.clone(),
+            });
+        }
+        Ok(Self {
+            mpv,
+            preferred: std::sync::Mutex::new(preferred),
+        })
+    }
+
+    /// Once the file's tracks are known, switches to the preferred variants: mpv picks by
+    /// language alone, so with "English" and "English SDH" it may pick the wrong one. Cheap to
+    /// call repeatedly; does nothing after the first time it finds tracks.
+    pub fn apply_preferred_tracks(&self) {
+        let Ok(mut preferred) = self.preferred.lock() else {
+            return;
+        };
+        if preferred.is_empty() {
+            return;
+        }
+        let count: i64 = self.mpv.get_property("track-list/count").unwrap_or(0);
+        if count == 0 {
+            return;
+        }
+        let tracks = self.tracks();
+        for want in preferred.drain(..) {
+            let found = tracks.iter().find(|t| {
+                t.kind == want.kind
+                    && t.lang == want.lang
+                    && t.title.as_deref() == Some(want.title.as_str())
+            });
+            let Some(track) = found.filter(|t| !t.selected) else {
+                continue;
+            };
+            let result = match want.kind {
+                TrackKind::Audio => self.select_audio(track.id),
+                TrackKind::Subtitle => self.select_subtitle(Some(track.id)),
+            };
+            if let Err(e) = result {
+                tracing::warn!("cannot select preferred track: {e}");
+            }
+        }
     }
 
     /// Loads a file, optionally starting at `start` seconds (for resume).

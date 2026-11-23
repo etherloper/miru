@@ -379,6 +379,9 @@ pub fn window_controls() -> impl IntoElement {
                 .justify_center()
                 .text_color(text())
                 .window_control_area(area)
+                // Windows runs the button on mouse up only if nothing in the app handled the
+                // click, so cards and posters under it must not see the press at all.
+                .block_mouse_except_scroll()
                 .hover(move |s| {
                     if danger {
                         s.bg(rgb(0xc42b1c))

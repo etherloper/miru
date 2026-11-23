@@ -145,6 +145,7 @@ impl LibraryView {
                 .child(toggle)
         };
 
+        let collections = self.render_sidebar_collections(window, cx);
         let sidebar = div()
             .w(px(target))
             .h_full()
@@ -158,31 +159,51 @@ impl LibraryView {
             .child(header)
             .child(
                 div()
-                    .pt_2()
-                    .flex()
-                    .flex_col()
-                    .gap(px(NAV_ITEM_GAP))
-                    // In the order chosen in Settings.
-                    .children(self.settings.sidebar_order.iter().map(|nav| match nav {
-                        NavItem::Search => item(
-                            "nav-search",
-                            nav.label(),
-                            "icons/search.svg",
-                            matches!(self.page, Page::Browse(Tab::Search)),
-                            Box::new(cx.listener(|this, _, _, cx| this.open_search(cx))),
-                        ),
-                        NavItem::Home => {
-                            tab_item("nav-home", nav.label(), "icons/home.svg", Tab::Home, cx)
-                        }
-                        NavItem::Movies => {
-                            tab_item("nav-movies", nav.label(), "icons/film.svg", Tab::Movies, cx)
-                        }
-                        NavItem::Shows => {
-                            tab_item("nav-shows", nav.label(), "icons/tv.svg", Tab::Shows, cx)
-                        }
-                    })),
+                    .id("sidebar-scroll")
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .pb_4()
+                    .child(
+                        div()
+                            .pt_2()
+                            .flex()
+                            .flex_col()
+                            .gap(px(NAV_ITEM_GAP))
+                            // In the order chosen in Settings.
+                            .children(self.settings.sidebar_order.iter().map(|nav| match nav {
+                                NavItem::Search => item(
+                                    "nav-search",
+                                    nav.label(),
+                                    "icons/search.svg",
+                                    matches!(self.page, Page::Browse(Tab::Search)),
+                                    Box::new(cx.listener(|this, _, _, cx| this.open_search(cx))),
+                                ),
+                                NavItem::Home => tab_item(
+                                    "nav-home",
+                                    nav.label(),
+                                    "icons/home.svg",
+                                    Tab::Home,
+                                    cx,
+                                ),
+                                NavItem::Movies => tab_item(
+                                    "nav-movies",
+                                    nav.label(),
+                                    "icons/film.svg",
+                                    Tab::Movies,
+                                    cx,
+                                ),
+                                NavItem::Shows => tab_item(
+                                    "nav-shows",
+                                    nav.label(),
+                                    "icons/tv.svg",
+                                    Tab::Shows,
+                                    cx,
+                                ),
+                            })),
+                    )
+                    .child(collections),
             )
-            .child(div().flex_1())
             // A waiting update: the button downloads and installs it in place (see about.rs).
             .children(self.update_button(collapsed, window, cx))
             .child(div().pb_4().child(item(
@@ -228,7 +249,9 @@ impl LibraryView {
                 div()
                     .flex_1()
                     .h(px(NAV_HEIGHT))
-                    .window_control_area(WindowControlArea::Drag),
+                    .window_control_area(WindowControlArea::Drag)
+                    // Same for the drag strip: a press here moves the window, not the hero.
+                    .block_mouse_except_scroll(),
             )
             .children(status.map(|(text, failed)| {
                 div()

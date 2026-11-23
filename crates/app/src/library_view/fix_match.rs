@@ -2,13 +2,14 @@
 
 use super::*;
 use crate::library_sync::MatchCandidate;
+use crate::text_edit::{self, KeyOutcome, TextEdit};
 
 /// Rows of overview text shown per candidate.
 const FIX_OVERVIEW_LINE_H: f32 = 18.;
 
 pub(super) struct FixMatch {
     item: LibraryItem,
-    query: String,
+    query: TextEdit,
     /// The query the current results are for; Enter searches again when the text differs.
     searched: String,
     kind: ItemKind,
@@ -30,7 +31,9 @@ enum FixStatus {
 
 impl LibraryView {
     pub(super) fn open_fix_match(&mut self, item: LibraryItem, cx: &mut Context<Self>) {
-        let query = item.display_title().to_string();
+        // Prefilled and selected, so typing replaces it and the arrows edit it.
+        let mut query = TextEdit::new(item.display_title());
+        query.select_all();
         let kind = item.key.kind;
         self.fix_match = Some(FixMatch {
             item,
@@ -63,12 +66,12 @@ impl LibraryView {
             cx.notify();
             return;
         };
-        let query = fix.query.trim().to_string();
+        let query = fix.query.text().trim().to_string();
         if query.is_empty() {
             return;
         }
         fix.request += 1;
-        fix.searched = fix.query.clone();
+        fix.searched = fix.query.text().to_string();
         fix.status = FixStatus::Searching;
         let (request, kind, paths) = (fix.request, fix.kind, self.paths.clone());
         cx.notify();
@@ -191,7 +194,6 @@ impl LibraryView {
             return;
         };
         let k = &event.keystroke;
-        let command = k.modifiers.control || k.modifiers.platform;
         match k.key.as_str() {
             "escape" => {
                 self.close_fix_match(window, cx);
@@ -199,7 +201,7 @@ impl LibraryView {
                 return;
             }
             "enter" => {
-                if fix.query != fix.searched || fix.results.is_empty() {
+                if fix.query.text() != fix.searched || fix.results.is_empty() {
                     self.run_fix_search(cx);
                 } else {
                     let ix = fix.selected;
@@ -210,28 +212,11 @@ impl LibraryView {
             }
             "down" => fix.selected = (fix.selected + 1).min(fix.results.len().saturating_sub(1)),
             "up" => fix.selected = fix.selected.saturating_sub(1),
-            "backspace" if command => {
-                let trimmed = fix.query.trim_end().len();
-                let cut = fix.query[..trimmed].rfind(' ').map_or(0, |i| i + 1);
-                fix.query.truncate(cut);
-            }
-            "backspace" => {
-                fix.query.pop();
-            }
-            "v" if command => {
-                if let Some(text) = cx.read_from_clipboard().and_then(|c| c.text()) {
-                    let clean: String = text
-                        .chars()
-                        .map(|c| if c.is_control() { ' ' } else { c })
-                        .collect();
-                    fix.query.push_str(clean.trim());
+            _ => {
+                if fix.query.handle_key(k, cx) == KeyOutcome::Unhandled {
+                    return;
                 }
             }
-            _ if command || k.modifiers.alt => return,
-            _ => match &k.key_char {
-                Some(typed) if !typed.chars().any(char::is_control) => fix.query.push_str(typed),
-                _ => return,
-            },
         }
         cx.stop_propagation();
         cx.notify();
@@ -245,19 +230,6 @@ impl LibraryView {
         };
         let focused = self.fix_focus.is_focused(window);
         let current_id = fix.item.metadata.as_ref().and_then(|m| m.tmdb_id);
-        let caret = || {
-            div()
-                .flex_shrink_0()
-                .w(px(2.))
-                .h(px(20.))
-                .rounded_full()
-                .bg(theme::text())
-                .with_animation(
-                    "fix-caret",
-                    Animation::new(Duration::from_millis(1060)).repeat(),
-                    |el, t| el.opacity(if t < 0.55 { 1. } else { 0. }),
-                )
-        };
 
         let heading = div()
             .px_5()
@@ -306,6 +278,7 @@ impl LibraryView {
             ));
 
         let field = div()
+            .id("fix-field")
             .mx_5()
             .mt_4()
             .mb_3()
@@ -320,31 +293,25 @@ impl LibraryView {
             .border_color(theme::glass_border())
             .cursor_text()
             .child(icon("icons/search.svg", 16., theme::text_tertiary()))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .flex()
-                    .items_center()
-                    .when(fix.query.is_empty(), |d| {
-                        d.when(focused, |d| d.child(caret())).child(
-                            div()
-                                .text_color(theme::text_tertiary())
-                                .child("Title to search for"),
-                        )
-                    })
-                    .when(!fix.query.is_empty(), |d| {
-                        d.child(div().truncate().child(fix.query.clone()))
-                            .when(focused, |d| d.child(caret()))
-                    }),
-            )
+            .child(div().flex_1().min_w_0().child(fix.query.element(
+                "Title to search for",
+                theme::text(),
+                theme::text_tertiary(),
+                focused,
+            )))
             .child(div().text_xs().text_color(theme::text_tertiary()).child(
-                if fix.query != fix.searched {
+                if fix.query.text() != fix.searched {
                     "↵ Search"
                 } else {
                     ""
                 },
             ));
+        let field = text_edit::mouse_handlers(
+            field,
+            &self.fix_focus,
+            |this: &mut Self| this.fix_match.as_mut().map(|f| &mut f.query),
+            cx,
+        );
 
         let message = |text: SharedString| {
             div()
