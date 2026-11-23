@@ -532,7 +532,7 @@ impl Element for TextLine {
                 let end = bounds.left() + line.x_for_index(self.selection.end) - scroll;
                 window.paint_quad(fill(
                     Bounds::from_corners(point(start, bounds.top()), point(end, bounds.bottom())),
-                    gpui::rgba(0xffffff38),
+                    crate::theme::overlay(0x38),
                 ));
             }
             let origin = point(bounds.left() - scroll, bounds.top());

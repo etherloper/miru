@@ -173,7 +173,7 @@ impl LibraryView {
             .items_center()
             .gap_3()
             .border_b_1()
-            .border_color(rgba(0xffffff0d))
+            .border_color(theme::overlay(0x0d))
             .when(pane.person.is_some(), |d| {
                 d.child(
                     round_button(
@@ -231,7 +231,7 @@ impl LibraryView {
             .w(px(SHEET_W))
             .flex()
             .flex_col()
-            .bg(rgba(0x16161cf7))
+            .bg(theme::panel())
             .border_l_1()
             .border_color(theme::glass_border())
             .shadow(theme::frost_shadow())
@@ -247,7 +247,7 @@ impl LibraryView {
             .id("cast-overlay")
             .absolute()
             .inset_0()
-            .bg(rgba(0x00000066))
+            .bg(theme::backdrop())
             .on_mouse_down(
                 gpui::MouseButton::Left,
                 cx.listener(|this, _, _, cx| this.close_cast(cx)),
@@ -306,7 +306,7 @@ impl LibraryView {
                 .rounded(px(10.))
                 .when(can_open, |d| {
                     d.cursor_pointer()
-                        .hover(|s| s.bg(rgba(0xffffff0f)))
+                        .hover(|s| s.bg(theme::overlay(0x0f)))
                         .on_click(
                             cx.listener(move |this, _, _, cx| this.open_person(chosen.clone(), cx)),
                         )
@@ -341,7 +341,7 @@ impl LibraryView {
                             .px_2()
                             .py_0p5()
                             .rounded_full()
-                            .bg(rgba(0xffffff14))
+                            .bg(theme::overlay(0x14))
                             .text_xs()
                             .text_color(theme::text_secondary())
                             .child(format!("{others} more")),

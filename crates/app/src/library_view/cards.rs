@@ -7,11 +7,49 @@
 
 use std::cell::RefCell;
 
-use gpui::{Entity, StyleRefinement, WeakEntity};
+use gpui::{Entity, Rgba, StyleRefinement, WeakEntity};
 
 use super::poster_drag::CarryArt;
 use super::*;
 use crate::image_cache::BoundedImageCache;
+
+/// Over artwork the colours stay light in both palettes.
+const IMG_RIM: Rgba = Rgba {
+    r: 1.,
+    g: 1.,
+    b: 1.,
+    a: 0.18,
+};
+const IMG_RIM_HOVER: Rgba = Rgba {
+    r: 1.,
+    g: 1.,
+    b: 1.,
+    a: 0.35,
+};
+const IMG_RIM_SOFT: Rgba = Rgba {
+    r: 1.,
+    g: 1.,
+    b: 1.,
+    a: 0.15,
+};
+const IMG_TEXT_DIM: Rgba = Rgba {
+    r: 1.,
+    g: 1.,
+    b: 1.,
+    a: 0.7,
+};
+const IMG_TEXT_FAINT: Rgba = Rgba {
+    r: 1.,
+    g: 1.,
+    b: 1.,
+    a: 0.45,
+};
+const IMG_NUMBER: Rgba = Rgba {
+    r: 1.,
+    g: 1.,
+    b: 1.,
+    a: 0.25,
+};
 
 /// Space between a card's artwork and its caption.
 const CARD_GAP: f32 = 12.;
@@ -65,6 +103,13 @@ struct Slot {
 /// across frames so hover state survives.
 #[derive(Default)]
 pub(super) struct Cards(RefCell<HashMap<(&'static str, String), Slot>>);
+
+impl Cards {
+    /// Drops every card, so all are drawn afresh (e.g. after the palette changes).
+    pub fn clear(&self) {
+        self.0.borrow_mut().clear();
+    }
+}
 
 impl LibraryView {
     /// Embeds the card at `slot` as a cached view of `w` x `h` (from its hover state), making
@@ -307,10 +352,10 @@ impl Card {
             .justify_center()
             .bg(rgba(0x000000d9))
             .border_1()
-            .border_color(rgba(0xffffff2e))
+            .border_color(IMG_RIM)
             .cursor_pointer()
-            .hover(|s| s.bg(rgba(0x2a2a30f2)).border_color(rgba(0xffffff59)))
-            .child(icon("icons/more.svg", 16., theme::text()))
+            .hover(|s| s.bg(rgba(0x2a2a30f2)).border_color(IMG_RIM_HOVER))
+            .child(icon("icons/more.svg", 16., theme::on_image()))
             // The press belongs to the button: it doesn't pick the poster up or scroll the row.
             .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(cx.listener(move |card, event: &ClickEvent, _, cx| {
@@ -369,6 +414,7 @@ impl Card {
                 .p_4()
                 .flex()
                 .items_end()
+                .text_color(theme::on_image())
                 .font_family(theme::FONT_DISPLAY)
                 .text_xl()
                 .font_weight(FontWeight::BOLD)
@@ -395,8 +441,8 @@ impl Card {
                         .justify_center()
                         .bg(rgba(0x000000b3))
                         .border_1()
-                        .border_color(rgba(0xffffff26))
-                        .child(icon("icons/check.svg", 12., theme::text())),
+                        .border_color(IMG_RIM_SOFT)
+                        .child(icon("icons/check.svg", 12., theme::on_image())),
                 )
             })
             .children(more);
@@ -425,7 +471,7 @@ impl Card {
                             .text_color(if self.hovered {
                                 theme::text()
                             } else {
-                                rgba(0xe8e8edff)
+                                theme::text_soft()
                             })
                             .child(title),
                     )
@@ -460,6 +506,7 @@ impl Card {
                     .flex()
                     .flex_col()
                     .gap_1()
+                    .text_color(theme::on_image())
                     .child(
                         div()
                             .font_weight(FontWeight::SEMIBOLD)
@@ -469,12 +516,16 @@ impl Card {
                     .child(
                         div()
                             .text_xs()
-                            .text_color(rgba(0xffffffb3))
+                            .text_color(IMG_TEXT_DIM)
                             .truncate()
                             .child(card.subtitle.clone()),
                     )
                     .when(card.fraction > 0., |d| {
-                        d.child(div().mt_1().child(theme::progress_bar(card.fraction, 3.)))
+                        d.child(
+                            div()
+                                .mt_1()
+                                .child(theme::progress_bar_on_image(card.fraction, 3.)),
+                        )
                     }),
             );
         div()
@@ -537,7 +588,7 @@ impl Card {
                         .font_family(theme::FONT_DISPLAY)
                         .text_size(px(56.))
                         .font_weight(FontWeight::BOLD)
-                        .text_color(rgba(0xffffff40))
+                        .text_color(IMG_NUMBER)
                         .child(if loading {
                             String::new()
                         } else {
@@ -568,8 +619,8 @@ impl Card {
                                 .justify_center()
                                 .bg(rgba(0x000000b3))
                                 .border_1()
-                                .border_color(theme::glass_border())
-                                .child(icon("icons/play.svg", 22., theme::text())),
+                                .border_color(IMG_RIM_SOFT)
+                                .child(icon("icons/play.svg", 22., theme::on_image())),
                         ),
                 )
             })
@@ -590,15 +641,15 @@ impl Card {
                         .justify_center()
                         .bg(rgba(0x000000cc))
                         .border_1()
-                        .border_color(rgba(0xffffff26))
+                        .border_color(IMG_RIM_SOFT)
                         .hover(|s| s.bg(rgba(0x2a2a33f0)))
                         .child(icon(
                             "icons/check.svg",
                             14.,
                             if watched {
-                                theme::text()
+                                theme::on_image()
                             } else {
-                                theme::text_tertiary()
+                                IMG_TEXT_FAINT
                             },
                         ))
                         .tooltip(theme::text_tooltip(if watched {
@@ -623,7 +674,7 @@ impl Card {
                         .left_3()
                         .right_3()
                         .bottom_3()
-                        .child(theme::progress_bar(p.fraction(), 3.)),
+                        .child(theme::progress_bar_on_image(p.fraction(), 3.)),
                 )
             });
 

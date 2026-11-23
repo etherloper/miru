@@ -143,10 +143,10 @@ impl LibraryView {
                             .flex()
                             .items_center()
                             .rounded(px(8.))
-                            .bg(rgba(0xffffff0d))
+                            .bg(theme::overlay(0x0d))
                             .border_1()
                             .border_color(if focused {
-                                rgba(0xffffff4d)
+                                theme::overlay(0x4d)
                             } else {
                                 theme::glass_border()
                             })
@@ -413,7 +413,11 @@ impl LibraryView {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .bg(rgba(0x000000ff))
+                    .bg(if theme::is_light() {
+                        theme::overlay(0xff)
+                    } else {
+                        rgba(0x000000ff)
+                    })
                     .border_1()
                     .border_color(theme::glass_border())
                     .child(icon("icons/enso.svg", 26., theme::text())),
@@ -803,7 +807,7 @@ impl LibraryView {
             .text_color(theme::bg())
             .shadow(theme::card_shadow(0.))
             .bg(if progress.is_some() {
-                rgba(0xffffff73)
+                theme::overlay(0x73)
             } else {
                 theme::text()
             })
@@ -827,7 +831,7 @@ impl LibraryView {
         let button = match action {
             Some(action) => button
                 .cursor_pointer()
-                .hover(|s| s.bg(rgba(0xffffffd9)))
+                .hover(|s| s.bg(theme::overlay(0xd9)))
                 .on_click(cx.listener(move |this, _, _, cx| match action {
                     UpdateAction::Download => this.download_update(cx),
                     UpdateAction::Install => this.install_update(cx),

@@ -288,7 +288,7 @@ impl LibraryView {
             .items_center()
             .gap_3()
             .rounded(px(10.))
-            .bg(rgba(0xffffff0d))
+            .bg(theme::overlay(0x0d))
             .border_1()
             .border_color(theme::glass_border())
             .cursor_text()
@@ -367,7 +367,7 @@ impl LibraryView {
                         .py_2()
                         .rounded(px(8.))
                         .cursor_pointer()
-                        .when(selected, |d| d.bg(rgba(0xffffff14)))
+                        .when(selected, |d| d.bg(theme::overlay(0x14)))
                         .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
                             if let Some(fix) = &mut this.fix_match
                                 && *hovered
@@ -410,7 +410,7 @@ impl LibraryView {
                                                 .px_2()
                                                 .py_0p5()
                                                 .rounded_full()
-                                                .bg(rgba(0xffffff14))
+                                                .bg(theme::overlay(0x14))
                                                 .text_xs()
                                                 .text_color(theme::text_secondary())
                                                 .child(t)
@@ -460,7 +460,7 @@ impl LibraryView {
             .child(
                 div()
                     .border_t_1()
-                    .border_color(rgba(0xffffff0d))
+                    .border_color(theme::overlay(0x0d))
                     .child(body),
             );
 
@@ -468,7 +468,7 @@ impl LibraryView {
             .id("fix-overlay")
             .absolute()
             .inset_0()
-            .bg(rgba(0x00000099))
+            .bg(theme::backdrop())
             .flex()
             .justify_center()
             .items_start()

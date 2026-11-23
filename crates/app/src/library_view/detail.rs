@@ -396,7 +396,7 @@ impl LibraryView {
                 .px_2()
                 .rounded(px(6.))
                 .border_1()
-                .border_color(rgba(0xffffff4d))
+                .border_color(theme::overlay(0x4d))
                 .text_xs()
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(theme::text())
@@ -475,8 +475,8 @@ impl LibraryView {
             .child(art_layer(backdrop, 0., ART_BACKDROP))
             .child(div().absolute().inset_0().bg(linear_gradient(
                 90.,
-                linear_color_stop(rgba(0x000000f2), 0.),
-                linear_color_stop(rgba(0x00000000), 0.7),
+                linear_color_stop(theme::page(0xf2), 0.),
+                linear_color_stop(theme::page(0), 0.7),
             )))
             // Bottom fade into the page, eased: GPUI gradients have two stops, so a short solid
             // fade and a long soft one are layered, which avoids the hard line a single linear
@@ -484,12 +484,12 @@ impl LibraryView {
             .child(div().absolute().inset_0().bg(linear_gradient(
                 0.,
                 linear_color_stop(theme::bg(), 0.),
-                linear_color_stop(rgba(0x00000000), 0.28),
+                linear_color_stop(theme::page(0), 0.28),
             )))
             .child(div().absolute().inset_0().bg(linear_gradient(
                 0.,
-                linear_color_stop(rgba(0x000000b3), 0.),
-                linear_color_stop(rgba(0x00000000), 0.62),
+                linear_color_stop(theme::page(0xb3), 0.),
+                linear_color_stop(theme::page(0), 0.62),
             )))
             .children(poster)
             .child(
@@ -547,7 +547,7 @@ impl LibraryView {
                     .children(meta.overview.clone().map(|o| {
                         div()
                             .max_w(px(680.))
-                            .text_color(rgba(0xe8e8edff))
+                            .text_color(theme::text_soft())
                             .line_height(px(24.))
                             .child(o)
                     }))
@@ -557,7 +557,7 @@ impl LibraryView {
             )
     }
 
-    /// The title's logo when one was downloaded (fitted inside `max_h` x `max_w` by its real
+    /// The title's logo when one was downloaded (dark theme only) (fitted inside `max_h` x `max_w` by its real
     /// proportions), otherwise the title as large display text.
     pub(super) fn title_art(
         &self,
@@ -567,7 +567,9 @@ impl LibraryView {
         max_w: f32,
         text_size: f32,
     ) -> AnyElement {
-        if let Some(logo) = meta.logo_file.clone()
+        // TMDB logos are mostly white, made for dark backgrounds: the light theme uses text.
+        if !theme::is_light()
+            && let Some(logo) = meta.logo_file.clone()
             && let Some((w, h)) = self.image_size(&logo)
         {
             let aspect = w as f32 / h.max(1) as f32;

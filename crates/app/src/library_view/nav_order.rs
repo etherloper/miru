@@ -164,10 +164,10 @@ impl LibraryView {
                 .border_color(theme::glass_border())
                 .cursor_grab()
                 .when(lifted, |d| {
-                    d.bg(rgba(0x1c1c22f2))
+                    d.bg(theme::panel())
                         .rounded(px(10.))
                         .border_1()
-                        .border_color(rgba(0xffffff26))
+                        .border_color(theme::overlay(0x26))
                         .shadow(theme::card_shadow(1.))
                 })
                 .child(icon("icons/grip.svg", 16., theme::text_tertiary()))

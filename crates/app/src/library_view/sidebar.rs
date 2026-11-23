@@ -38,7 +38,7 @@ impl LibraryView {
                 .text_sm()
                 .font_weight(FontWeight::MEDIUM)
                 .text_color(ink)
-                .when(selected, |d| d.bg(rgba(0xffffff0f)))
+                .when(selected, |d| d.bg(theme::overlay(0x0f)))
                 .when(!selected, |d| d.hover(|s| s.text_color(theme::text())))
                 .child(icon(icon_path, 18., ink))
                 .when(collapsed, |d| d.tooltip(theme::text_tooltip(label)))
@@ -66,7 +66,7 @@ impl LibraryView {
             .items_center()
             .justify_center()
             .cursor_pointer()
-            .hover(|s| s.bg(rgba(0xffffff0f)))
+            .hover(|s| s.bg(theme::overlay(0x0f)))
             .relative()
             .group("sidebar-toggle")
             .when(!collapsed, |d| {
@@ -153,9 +153,9 @@ impl LibraryView {
             .overflow_hidden()
             .flex()
             .flex_col()
-            .bg(rgba(0x000000ff))
+            .bg(theme::bg())
             .border_r_1()
-            .border_color(rgba(0xffffff0a))
+            .border_color(theme::overlay(0x0a))
             .child(header)
             .child(
                 div()
@@ -263,7 +263,7 @@ impl LibraryView {
                     .items_center()
                     .max_w(px(360.))
                     .rounded_full()
-                    .bg(rgba(0x000000b3))
+                    .bg(theme::page(0xb3))
                     .text_xs()
                     .text_color(if failed {
                         rgba(0xff9b9bff)
@@ -276,7 +276,7 @@ impl LibraryView {
                 // A soft pill behind the window controls keeps them legible over bright art.
                 div()
                     .rounded_bl(px(12.))
-                    .bg(rgba(0x00000080))
+                    .bg(theme::page(0x80))
                     .child(theme::window_controls()),
             )
     }

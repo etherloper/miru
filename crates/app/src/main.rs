@@ -37,6 +37,7 @@ struct Root {
     library: Entity<LibraryView>,
     player: Option<(Entity<PlayerView>, Subscription)>,
     _library_events: Subscription,
+    _appearance: Subscription,
 }
 
 impl Root {
@@ -52,7 +53,13 @@ impl Root {
             cx.subscribe_in(&library, window, |this, _, event, window, cx| match event {
                 LibraryEvent::Play(request) => this.play(request.clone(), window, cx),
             });
+        // Redraw when Windows switches between light and dark (for the System theme).
+        let weak = library.downgrade();
+        let appearance = window.observe_window_appearance(move |_, cx| {
+            weak.update(cx, |_, cx| cx.notify()).ok();
+        });
         let mut root = Self {
+            _appearance: appearance,
             library,
             player: None,
             _library_events: library_events,

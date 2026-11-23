@@ -1597,6 +1597,8 @@ impl PlayerView {
 
 impl Render for PlayerView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // The player sits on video: it always uses the dark palette.
+        let _dark = theme::force_dark();
         let viewport = window.viewport_size();
         self.track_window_hover(window);
         let scale = window.scale_factor();

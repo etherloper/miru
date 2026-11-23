@@ -318,6 +318,26 @@ impl LibraryView {
                 subtitle_lang.into_any_element(),
             ),
         ];
+        let appearance = segmented(
+            "appearance",
+            Appearance::ALL
+                .iter()
+                .map(|a| (a.label().to_string(), *a == s.appearance))
+                .collect(),
+            cx.listener(|this, ix: &usize, _, cx| {
+                if let Some(a) = Appearance::ALL.get(*ix).copied() {
+                    this.update_settings(|s| s.appearance = a, cx);
+                }
+            }),
+        );
+        let appearance_rows = vec![
+            setting_row(
+                "Theme",
+                Some("System follows your Windows light or dark mode."),
+                Some(appearance.into_any_element()),
+            )
+            .into_any_element(),
+        ];
         let home_rows = vec![
             setting_row(
                 "Rotate featured titles",
@@ -365,6 +385,7 @@ impl LibraryView {
                                     .font_weight(FontWeight::BOLD)
                                     .child("Settings"),
                             )
+                            .child(section("Appearance", "", appearance_rows))
                             .child(section(
                                 "Library",
                                 "Folders Miru scans for movies and TV shows. Files are never modified.",
@@ -528,7 +549,7 @@ impl LibraryView {
                     .border_b_1()
                     .border_color(theme::glass_border())
                     .when(key.is_some(), |d| {
-                        d.cursor_pointer().hover(|s| s.bg(rgba(0xffffff08)))
+                        d.cursor_pointer().hover(|s| s.bg(theme::overlay(0x08)))
                     })
                     .on_click(cx.listener(move |this, _, _, cx| {
                         if let Some(key) = &key {
@@ -811,7 +832,7 @@ pub(super) fn section(
                 // Outlined on the black page rather than filled grey: on OLED panels a
                 // near-black fill looks blotchy, while black with a hairline stays clean.
                 .border_1()
-                .border_color(rgba(0xffffff38))
+                .border_color(theme::overlay(0x38))
                 .flex()
                 .flex_col()
                 .children(rows),
@@ -964,7 +985,7 @@ pub(super) fn toggle(
         .items_center()
         .cursor_pointer()
         .when(on, |d| d.bg(theme::accent()).justify_end())
-        .when(!on, |d| d.bg(rgba(0xffffff29)).justify_start())
+        .when(!on, |d| d.bg(theme::overlay(0x29)).justify_start())
         .child(
             div()
                 .size(px(22.))
@@ -1064,7 +1085,7 @@ fn key_combo(combo: &str) -> AnyElement {
                 .items_center()
                 .justify_center()
                 .rounded(px(6.))
-                .bg(rgba(0xffffff0f))
+                .bg(theme::overlay(0x0f))
                 .border_1()
                 .border_color(theme::glass_border())
                 .text_xs()
