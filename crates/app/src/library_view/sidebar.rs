@@ -2,9 +2,103 @@
 
 use miru_core::settings::NavItem;
 
+use gpui::Stateful;
+
 use super::*;
 
 impl LibraryView {
+    /// While a collapsed-sidebar icon is hovered, its label pops out to the right of the rail.
+    /// (GPUI tooltips sit right under the pointer, where the cursor covers them.)
+    pub(super) fn side_tip(
+        &self,
+        collapsed: bool,
+        el: Stateful<Div>,
+        key: &'static str,
+        label: impl Into<SharedString>,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        if !collapsed {
+            return el;
+        }
+        el.relative()
+            .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+                this.set_side_tip(key.into(), *hovered, cx)
+            }))
+            .children(self.side_label(key, label))
+    }
+
+    pub(super) fn set_side_tip(
+        &mut self,
+        key: SharedString,
+        hovered: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let next = if hovered {
+            Some(key)
+        } else if self.side_tip_key.as_ref() == Some(&key) {
+            None
+        } else {
+            return;
+        };
+        if self.side_tip_key != next {
+            self.side_tip_key = next;
+            cx.notify();
+        }
+    }
+
+    /// The popped-out label for `key`, if it is the one hovered. Place it inside the hovered
+    /// element (made `relative`): it sits just past that element's right edge.
+    pub(super) fn side_label(
+        &self,
+        key: &str,
+        label: impl Into<SharedString>,
+    ) -> Option<AnyElement> {
+        if self.side_tip_key.as_deref() != Some(key) {
+            return None;
+        }
+        let label: SharedString = label.into();
+        Some(
+            div()
+                .absolute()
+                .left_full()
+                .top_0()
+                .bottom_0()
+                .flex()
+                .items_center()
+                .child(
+                    gpui::deferred(
+                        gpui::anchored().child(
+                            div()
+                                .ml(px(12.))
+                                .mt(px(-13.))
+                                .h(px(26.))
+                                .px_2p5()
+                                .flex()
+                                .items_center()
+                                .rounded(px(8.))
+                                .bg(rgba(0x22222af5))
+                                .border_1()
+                                .border_color(theme::glass_border())
+                                .shadow(theme::card_shadow(0.))
+                                .text_xs()
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(theme::text())
+                                .whitespace_nowrap()
+                                .child(label)
+                                .with_animation(
+                                    "side-tip-in",
+                                    Animation::new(theme::motion(120))
+                                        .with_easing(ease_out_quint()),
+                                    |el, t| el.opacity(t).ml(px(6. + 6. * t)),
+                                ),
+                        ),
+                    )
+                    .with_priority(3),
+                )
+                .into_any_element(),
+        )
+    }
+
     // ---- chrome ----------------------------------------------------------------------------
 
     /// Left navigation, kept quiet: the name, four plain rows and Settings at the bottom, on a
@@ -41,18 +135,18 @@ impl LibraryView {
                 .when(selected, |d| d.bg(rgba(0xffffff0f)))
                 .when(!selected, |d| d.hover(|s| s.text_color(theme::text())))
                 .child(icon(icon_path, 18., ink))
-                .when(collapsed, |d| d.tooltip(theme::text_tooltip(label)))
                 .when(!collapsed, |d| d.child(label))
                 .on_click(on_click)
         };
         let tab_item = |id, label, icon_path, tab: Tab, cx: &mut Context<Self>| {
-            item(
+            let row = item(
                 id,
                 label,
                 icon_path,
                 matches!(self.page, Page::Browse(t) if t == tab),
                 Box::new(cx.listener(move |this, _, _, cx| this.set_tab(tab, cx))),
-            )
+            );
+            self.side_tip(collapsed, row, id, label, cx)
         };
 
         let toggle = div()
@@ -96,12 +190,17 @@ impl LibraryView {
                         .child(icon("icons/sidebar.svg", 18., theme::text_secondary())),
                 )
             })
-            .tooltip(theme::text_tooltip(if collapsed {
-                "Expand sidebar  Ctrl+B"
-            } else {
-                "Collapse sidebar  Ctrl+B"
-            }))
+            .when(!collapsed, |d| {
+                d.tooltip(theme::text_tooltip("Collapse sidebar  Ctrl+B"))
+            })
             .on_click(cx.listener(|this, _, _, cx| this.toggle_sidebar(cx)));
+        let toggle = self.side_tip(
+            collapsed,
+            toggle,
+            "sidebar-toggle",
+            "Expand sidebar  Ctrl+B",
+            cx,
+        );
 
         let target = self.sidebar_width();
         let from = if collapsed {
@@ -145,6 +244,14 @@ impl LibraryView {
                 .child(toggle)
         };
 
+        let settings = item(
+            "nav-settings",
+            "Settings",
+            "icons/settings.svg",
+            matches!(self.page, Page::Settings),
+            Box::new(cx.listener(|this, _, _, cx| this.navigate(Page::Settings, cx))),
+        );
+        let settings = self.side_tip(collapsed, settings, "nav-settings", "Settings", cx);
         let collections = self.render_sidebar_collections(window, cx);
         let sidebar = div()
             .w(px(target))
@@ -172,13 +279,18 @@ impl LibraryView {
                             .gap(px(NAV_ITEM_GAP))
                             // In the order chosen in Settings.
                             .children(self.settings.sidebar_order.iter().map(|nav| match nav {
-                                NavItem::Search => item(
-                                    "nav-search",
-                                    nav.label(),
-                                    "icons/search.svg",
-                                    matches!(self.page, Page::Browse(Tab::Search)),
-                                    Box::new(cx.listener(|this, _, _, cx| this.open_search(cx))),
-                                ),
+                                NavItem::Search => {
+                                    let row = item(
+                                        "nav-search",
+                                        nav.label(),
+                                        "icons/search.svg",
+                                        matches!(self.page, Page::Browse(Tab::Search)),
+                                        Box::new(
+                                            cx.listener(|this, _, _, cx| this.open_search(cx)),
+                                        ),
+                                    );
+                                    self.side_tip(collapsed, row, "nav-search", nav.label(), cx)
+                                }
                                 NavItem::Home => tab_item(
                                     "nav-home",
                                     nav.label(),
@@ -206,13 +318,7 @@ impl LibraryView {
             )
             // A waiting update: the button downloads and installs it in place (see about.rs).
             .children(self.update_button(collapsed, window, cx))
-            .child(div().pb_4().child(item(
-                "nav-settings",
-                "Settings",
-                "icons/settings.svg",
-                matches!(self.page, Page::Settings),
-                Box::new(cx.listener(|this, _, _, cx| this.navigate(Page::Settings, cx))),
-            )));
+            .child(div().pb_4().child(settings));
 
         // Slide between widths right after a toggle; otherwise render at rest.
         if self.sidebar_changed_at.elapsed() < Duration::from_millis(260) {

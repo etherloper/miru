@@ -336,6 +336,8 @@ pub struct LibraryView {
     /// Sidebar-order rows' eased offsets while reordering.
     nav_shift: Vec<f32>,
     nav_frame: Instant,
+    /// The collapsed-sidebar icon whose label is popped out (see `side_tip`).
+    side_tip_key: Option<SharedString>,
     /// Watches the library folders; a change while a scan runs queues another one.
     folder_watch: Option<crate::folder_watch::FolderWatch>,
     rescan_pending: bool,
@@ -474,6 +476,7 @@ impl LibraryView {
             nav_drag: None,
             nav_shift: Vec::new(),
             nav_frame: Instant::now(),
+            side_tip_key: None,
             folder_watch: None,
             rescan_pending: false,
             update: Default::default(),

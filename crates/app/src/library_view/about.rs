@@ -781,7 +781,6 @@ impl LibraryView {
                 .flex()
                 .justify_center()
                 .child(badge)
-                .tooltip(theme::text_tooltip_owned(tooltip))
         } else {
             div()
                 .id("nav-update")
@@ -809,6 +808,7 @@ impl LibraryView {
                 )
                 .tooltip(theme::text_tooltip_owned(tooltip.clone()))
         };
+        let control = self.side_tip(collapsed, control, "nav-update", tooltip, cx);
         let control =
             match action {
                 Some(action) => control.cursor_pointer().on_click(cx.listener(

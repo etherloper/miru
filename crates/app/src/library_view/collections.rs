@@ -500,10 +500,13 @@ impl LibraryView {
                     })
                 })
                 .when(collapsed, |d| {
-                    d.tooltip(theme::text_tooltip_owned(c.name.clone().into()))
+                    d.children(self.side_label(&format!("collection-{id}"), c.name.clone()))
                 })
                 .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
-                    this.set_drop_target(target, *hovered, cx)
+                    this.set_drop_target(target, *hovered, cx);
+                    if this.settings.sidebar_collapsed {
+                        this.set_side_tip(format!("collection-{id}").into(), *hovered, cx);
+                    }
                 }));
             if editing.is_some() {
                 row.into_any_element()
@@ -568,18 +571,19 @@ impl LibraryView {
             .children(rows)
             .children(new_target)
             .when(collapsed && !dragging, |d| {
-                d.child(
-                    div().mt_1().flex().justify_center().child(
-                        theme::icon_button(
-                            "collection-new-rail",
-                            "icons/plus.svg",
-                            30.,
-                            true,
-                            cx.listener(|this, _, _, cx| this.new_collection(None, cx)),
-                        )
-                        .tooltip(theme::text_tooltip("New collection")),
+                d.child(div().mt_1().flex().justify_center().child(self.side_tip(
+                    true,
+                    theme::icon_button(
+                        "collection-new-rail",
+                        "icons/plus.svg",
+                        30.,
+                        true,
+                        cx.listener(|this, _, _, cx| this.new_collection(None, cx)),
                     ),
-                )
+                    "collection-new-rail",
+                    "New collection",
+                    cx,
+                )))
             })
             .into_any_element()
     }
