@@ -741,8 +741,8 @@ impl LibraryView {
                 Some(UpdateAction::Download),
             ),
             UpdateState::Downloading { progress, .. } => (
-                "Downloading update".into(),
-                format!("{}%", (progress * 100.).round()),
+                format!("Downloading {}%", (progress * 100.).round()),
+                String::new(),
                 None,
             ),
             UpdateState::Ready { release, .. } => (
@@ -766,6 +766,7 @@ impl LibraryView {
         let badge = update_badge(if collapsed { 40. } else { 32. }, progress, ready, failed);
         let tooltip: SharedString = match &self.update {
             UpdateState::DownloadFailed { message, .. } => message.clone(),
+            _ if detail.is_empty() => title.clone().into(),
             _ => format!("{title} · {detail}").into(),
         };
 
@@ -796,28 +797,17 @@ impl LibraryView {
                 .items_center()
                 .gap_3()
                 .child(badge)
+                // One line; the details are in the tooltip.
                 .child(
                     div()
                         .flex_1()
                         .min_w_0()
-                        .flex()
-                        .flex_col()
-                        .child(
-                            div()
-                                .text_sm()
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .truncate()
-                                .child(title),
-                        )
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(theme::text_secondary())
-                                .truncate()
-                                .child(detail),
-                        ),
+                        .text_sm()
+                        .font_weight(FontWeight::MEDIUM)
+                        .truncate()
+                        .child(title),
                 )
-                .when(failed, |d| d.tooltip(theme::text_tooltip_owned(tooltip)))
+                .tooltip(theme::text_tooltip_owned(tooltip.clone()))
         };
         let control =
             match action {
