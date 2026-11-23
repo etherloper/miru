@@ -6,6 +6,11 @@ use gpui::Stateful;
 
 use super::*;
 
+/// How long an icon is hovered before its label appears.
+const SIDE_TIP_DELAY: Duration = Duration::from_millis(800);
+/// Moving to another icon within this long of leaving one shows its label at once.
+const SIDE_TIP_SWAP: Duration = Duration::from_millis(300);
+
 impl LibraryView {
     /// While a collapsed-sidebar icon is hovered, its label pops out to the right of the rail.
     /// (GPUI tooltips sit right under the pointer, where the cursor covers them.)
@@ -27,23 +32,46 @@ impl LibraryView {
             .children(self.side_label(key, label))
     }
 
+    /// Hovering an icon shows its label after a short pause, like a tooltip. While one label is
+    /// showing (or just after), moving to the next icon swaps it straight away.
     pub(super) fn set_side_tip(
         &mut self,
         key: SharedString,
         hovered: bool,
         cx: &mut Context<Self>,
     ) {
-        let next = if hovered {
-            Some(key)
-        } else if self.side_tip_key.as_ref() == Some(&key) {
-            None
-        } else {
+        self.side_tip_epoch += 1;
+        if !hovered {
+            if self.side_tip_key.as_ref() == Some(&key) {
+                self.side_tip_key = None;
+                self.side_tip_left = Some(Instant::now());
+                cx.notify();
+            }
             return;
-        };
-        if self.side_tip_key != next {
-            self.side_tip_key = next;
-            cx.notify();
         }
+        let swapping = self.side_tip_key.is_some()
+            || self
+                .side_tip_left
+                .is_some_and(|t| t.elapsed() < SIDE_TIP_SWAP);
+        if swapping {
+            if self.side_tip_key.as_ref() != Some(&key) {
+                self.side_tip_key = Some(key);
+                cx.notify();
+            }
+            return;
+        }
+        let epoch = self.side_tip_epoch;
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(SIDE_TIP_DELAY).await;
+            this.update(cx, |view, cx| {
+                if view.side_tip_epoch == epoch {
+                    view.side_tip_key = Some(key);
+                    cx.notify();
+                }
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// The popped-out label for `key`, if it is the one hovered. Place it inside the hovered

@@ -338,6 +338,9 @@ pub struct LibraryView {
     nav_frame: Instant,
     /// The collapsed-sidebar icon whose label is popped out (see `side_tip`).
     side_tip_key: Option<SharedString>,
+    /// Bumped on every hover change, so a delayed label only appears if still hovered.
+    side_tip_epoch: usize,
+    side_tip_left: Option<Instant>,
     /// Watches the library folders; a change while a scan runs queues another one.
     folder_watch: Option<crate::folder_watch::FolderWatch>,
     rescan_pending: bool,
@@ -477,6 +480,8 @@ impl LibraryView {
             nav_shift: Vec::new(),
             nav_frame: Instant::now(),
             side_tip_key: None,
+            side_tip_epoch: 0,
+            side_tip_left: None,
             folder_watch: None,
             rescan_pending: false,
             update: Default::default(),
