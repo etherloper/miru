@@ -176,43 +176,26 @@ const WHITE: u32 = 0xf5f5f7ff;
 const INK: u32 = 0x0b0b0fff;
 /// Group on each button, so its icon can turn dark while the button is hovered.
 const BUTTON_GROUP: &str = "button";
-/// Group for a row of buttons: hovering any of them moves the white off the primary button,
-/// so only one button is white at a time.
-pub const BUTTON_ROW: &str = "button-row";
 
-/// The primary action (Play): white at rest, like the focused button on Apple TV. In a
-/// `BUTTON_ROW`, it turns charcoal while another button in the row is hovered.
+/// The main action (Play). Like every button it is smoked glass until hovered or focused,
+/// when it turns white, as on Apple TV.
 pub fn primary_button(
     id: &'static str,
     icon_path: Option<&'static str>,
     label: impl Into<gpui::SharedString>,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> Stateful<Div> {
-    button_base(id, icon_path, true, label.into(), Box::new(on_click))
-        .bg(rgba(WHITE))
-        .border_color(rgba(WHITE))
-        .text_color(rgba(INK))
-        .shadow(card_shadow(0.2))
-        .group_hover(BUTTON_ROW, |s| {
-            s.bg(rgba(SMOKE))
-                .border_color(rgba(SMOKE_RIM))
-                .text_color(text())
-        })
-        .hover(|s| {
-            s.bg(rgba(WHITE))
-                .border_color(rgba(WHITE))
-                .text_color(rgba(INK))
-        })
+    glass_button(id, icon_path, label, on_click)
 }
 
-/// A secondary action: charcoal at rest, white while hovered.
+/// A button: smoked glass at rest, white while hovered.
 pub fn glass_button(
     id: &'static str,
     icon_path: Option<&'static str>,
     label: impl Into<gpui::SharedString>,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> Stateful<Div> {
-    button_base(id, icon_path, false, label.into(), Box::new(on_click))
+    button_base(id, icon_path, label.into(), Box::new(on_click))
         .bg(rgba(SMOKE))
         .border_color(rgba(SMOKE_RIM))
         .text_color(text())
@@ -224,11 +207,9 @@ pub fn glass_button(
         })
 }
 
-/// An icon that follows its button's colours. SVGs don't inherit text colour, so the light
-/// and dark versions are stacked and shown by hover state: dark while its own button is
-/// hovered; for a primary button also dark at rest, and light while another button in its
-/// row is hovered.
-fn button_icon(path: &'static str, size: f32, primary: bool) -> Div {
+/// An icon that follows its button's colours. SVGs don't inherit text colour, so a dark copy
+/// sits over the light one and shows while the button is hovered.
+fn button_icon(path: &'static str, size: f32) -> Div {
     let layer = |color: Rgba| {
         svg()
             .path(path)
@@ -238,29 +219,21 @@ fn button_icon(path: &'static str, size: f32, primary: bool) -> Div {
             .size(px(size))
             .text_color(color)
     };
-    let mut stack = div().relative().size(px(size)).flex_shrink_0();
-    stack = if primary {
-        stack
-            .child(layer(rgba(INK)).group_hover(BUTTON_ROW, |s| s.opacity(0.)))
-            .child(
-                layer(text())
-                    .opacity(0.)
-                    .group_hover(BUTTON_ROW, |s| s.opacity(1.)),
-            )
-    } else {
-        stack.child(layer(text()))
-    };
-    stack.child(
-        layer(rgba(INK))
-            .opacity(0.)
-            .group_hover(BUTTON_GROUP, |s| s.opacity(1.)),
-    )
+    div()
+        .relative()
+        .size(px(size))
+        .flex_shrink_0()
+        .child(layer(text()))
+        .child(
+            layer(rgba(INK))
+                .opacity(0.)
+                .group_hover(BUTTON_GROUP, |s| s.opacity(1.)),
+        )
 }
 
 fn button_base(
     id: &'static str,
     icon_path: Option<&'static str>,
-    primary: bool,
     label: gpui::SharedString,
     on_click: ClickHandler,
 ) -> Stateful<Div> {
@@ -281,7 +254,7 @@ fn button_base(
         .text_size(px(16.))
         .font_weight(FontWeight::MEDIUM)
         .cursor_pointer()
-        .children(icon_path.map(|p| button_icon(p, 18., primary)))
+        .children(icon_path.map(|p| button_icon(p, 18.)))
         .child(label)
         .on_click(on_click)
 }
@@ -331,7 +304,7 @@ pub fn round_button_styled(
                         .border_color(rgba(WHITE))
                         .shadow(card_shadow(0.2))
                 })
-                .child(button_icon(icon_path, icon_size, false))
+                .child(button_icon(icon_path, icon_size))
         })
         .on_click(on_click)
 }

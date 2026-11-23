@@ -553,15 +553,7 @@ impl LibraryView {
                     }))
                     .children(starring)
                     .children(extra)
-                    .child(
-                        div()
-                            .mt_3()
-                            .flex()
-                            .items_center()
-                            .gap_3()
-                            .group(theme::BUTTON_ROW)
-                            .children(actions),
-                    ),
+                    .child(div().mt_3().flex().items_center().gap_3().children(actions)),
             )
     }
 
