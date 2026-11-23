@@ -800,14 +800,11 @@ impl LibraryView {
                 MenuEntry::new("Rename", "icons/pencil.svg", move |this, _, cx| {
                     this.start_rename(id, cx)
                 }),
-                MenuEntry::new(
-                    "Delete collection",
-                    "icons/trash.svg",
-                    move |this, _, cx| {
-                        this.collection_delete = Some(id);
-                        cx.notify();
-                    },
-                ),
+                MenuEntry::new("Delete", "icons/trash.svg", move |this, _, cx| {
+                    this.collection_delete = Some(id);
+                    cx.notify();
+                })
+                .danger(),
             ],
             None,
             cx,

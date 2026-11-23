@@ -171,7 +171,15 @@ impl LibraryView {
         .tooltip(theme::text_tooltip("More"));
 
         let menu = open.then(|| {
-            let list = self.menu_panel("more-menu", entries, |this| this.close_more_menu(), cx);
+            // Title menus list collections too and need the room; the others are short.
+            let width = if title.is_some() { 220. } else { 140. };
+            let list = self.menu_panel_sized(
+                "more-menu",
+                entries,
+                width,
+                |this| this.close_more_menu(),
+                cx,
+            );
             div().absolute().top_full().left_0().child(
                 gpui::deferred(
                     gpui::anchored()
