@@ -449,9 +449,10 @@ impl LibraryView {
             .w(px(600.))
             .rounded(px(16.))
             .overflow_hidden()
-            .bg(theme::panel())
+            // True black with a light outline, like the search panel and Settings cards.
+            .bg(rgba(0x000000ff))
             .border_1()
-            .border_color(theme::glass_border())
+            .border_color(rgba(0xffffff38))
             .shadow(theme::frost_shadow())
             .flex()
             .flex_col()
@@ -460,7 +461,7 @@ impl LibraryView {
             .child(
                 div()
                     .border_t_1()
-                    .border_color(rgba(0xffffff0d))
+                    .border_color(rgba(0xffffff1f))
                     .child(body),
             );
 
