@@ -30,6 +30,8 @@ impl NavDrag {
 
 impl LibraryView {
     fn start_nav_drag(&mut self, from: usize, y: f32, cx: &mut Context<Self>) {
+        self.side_tip_key = None;
+        self.side_tip_epoch += 1;
         self.nav_drag = Some(NavDrag {
             from,
             start_y: y,
@@ -181,7 +183,6 @@ impl LibraryView {
                 .when(!lifted, |d| {
                     d.tab_index(0)
                         .focus_visible(theme::focus_ring)
-                        .tooltip(theme::text_tooltip("Drag to reorder  Alt+↑ ↓"))
                         .on_mouse_down(
                             gpui::MouseButton::Left,
                             cx.listener(move |this, event: &gpui::MouseDownEvent, _, cx| {
@@ -200,7 +201,16 @@ impl LibraryView {
         };
         let rows = order.iter().enumerate().map(|(ix, item)| {
             let shift = self.nav_shift.get(ix).copied().unwrap_or(0.);
-            row(ix, *item, false, cx)
+            // Hidden while dragging, so it doesn't follow a row around.
+            let row_el = row(ix, *item, false, cx);
+            let row_el = self.side_tip(
+                dragging.is_none(),
+                row_el,
+                format!("nav-order-{ix}"),
+                "Drag to reorder  Alt+↑ ↓",
+                cx,
+            );
+            row_el
                 .relative()
                 .top(px(if dragging == Some(ix) { 0. } else { shift }))
                 // The dragged row's place stays empty; its lifted copy is drawn on top.

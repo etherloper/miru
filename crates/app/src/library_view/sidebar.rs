@@ -12,24 +12,27 @@ const SIDE_TIP_DELAY: Duration = Duration::from_millis(800);
 const SIDE_TIP_SWAP: Duration = Duration::from_millis(300);
 
 impl LibraryView {
-    /// While a collapsed-sidebar icon is hovered, its label pops out to the right of the rail.
-    /// (GPUI tooltips sit right under the pointer, where the cursor covers them.)
+    /// While a collapsed-sidebar icon (or another `enabled` element) is hovered, its label pops
+    /// out to its right. (GPUI tooltips sit right under the pointer, where the cursor covers
+    /// them.)
     pub(super) fn side_tip(
         &self,
         collapsed: bool,
         el: Stateful<Div>,
-        key: &'static str,
+        key: impl Into<SharedString>,
         label: impl Into<SharedString>,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
         if !collapsed {
             return el;
         }
+        let key: SharedString = key.into();
+        let label_el = self.side_label(&key, label);
         el.relative()
             .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
-                this.set_side_tip(key.into(), *hovered, cx)
+                this.set_side_tip(key.clone(), *hovered, cx)
             }))
-            .children(self.side_label(key, label))
+            .children(label_el)
     }
 
     /// Hovering an icon shows its label after a short pause, like a tooltip. While one label is
