@@ -166,6 +166,13 @@ pub fn icon(path: &'static str, size: f32, color: Rgba) -> impl IntoElement {
 
 type ClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 
+/// Rim of the outlined buttons (Apple TV style): a bright, fairly heavy ring.
+const OUTLINE: u32 = 0xffffffa6;
+/// Their fill: a light smoke, so the ring reads over bright artwork too.
+const OUTLINE_FILL: u32 = 0x00000038;
+/// Height shared by the pill buttons and the round buttons beside them.
+pub const BUTTON_H: f32 = 48.;
+
 /// White pill with dark text: the one primary action on a screen.
 pub fn primary_button(
     id: &'static str,
@@ -180,12 +187,13 @@ pub fn primary_button(
         label.into(),
         Box::new(on_click),
     )
-    .bg(text())
+    .bg(rgb(0xf2f2f4))
     .text_color(rgb(0x0b0b0f))
-    .hover(|s| s.bg(rgb(0xffffff)).shadow(card_shadow(0.4)))
+    .shadow(card_shadow(0.1))
+    .hover(|s| s.bg(rgb(0xffffff)).shadow(card_shadow(0.45)))
 }
 
-/// Frosted translucent pill for secondary actions over artwork.
+/// Outlined pill for secondary actions over artwork, matching the round buttons.
 pub fn glass_button(
     id: &'static str,
     icon_path: Option<&'static str>,
@@ -193,11 +201,11 @@ pub fn glass_button(
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> Stateful<Div> {
     button_base(id, icon_path, text(), label.into(), Box::new(on_click))
-        .bg(glass())
-        .border_1()
-        .border_color(glass_border())
+        .bg(rgba(OUTLINE_FILL))
+        .border_2()
+        .border_color(rgba(OUTLINE))
         .text_color(text())
-        .hover(|s| s.bg(glass_hover()))
+        .hover(|s| s.bg(rgba(0xffffff26)).border_color(text()))
 }
 
 fn button_base(
@@ -214,18 +222,20 @@ fn button_base(
         .flex()
         .flex_shrink_0()
         .items_center()
-        .gap_2()
-        .h(px(44.))
-        .px_6()
+        .gap(px(10.))
+        .h(px(BUTTON_H))
+        .pl(px(if icon_path.is_some() { 24. } else { 30. }))
+        .pr(px(30.))
         .rounded_full()
-        .font_weight(FontWeight::SEMIBOLD)
+        .text_size(px(16.))
+        .font_weight(FontWeight::MEDIUM)
         .cursor_pointer()
         .children(icon_path.map(|p| icon(p, 18., icon_color)))
         .child(label)
         .on_click(on_click)
 }
 
-/// Circular frosted icon button (player transport, back buttons).
+/// Outlined circular icon button (back buttons, the "⋯" beside Play).
 pub fn round_button(
     id: impl Into<gpui::ElementId>,
     icon_path: &'static str,
@@ -246,7 +256,7 @@ pub fn round_button_styled(
     let (fill, ink) = if selected {
         (text(), bg())
     } else {
-        (glass(), text())
+        (rgba(OUTLINE_FILL), text())
     };
     div()
         .id(id)
@@ -259,11 +269,13 @@ pub fn round_button_styled(
         .items_center()
         .justify_center()
         .bg(fill)
-        .border_1()
-        .border_color(glass_border())
+        .border_2()
+        .border_color(if selected { text() } else { rgba(OUTLINE) })
         .text_color(ink)
         .cursor_pointer()
-        .when(!selected, |d| d.hover(|s| s.bg(glass_hover())))
+        .when(!selected, |d| {
+            d.hover(|s| s.bg(rgba(0xffffff26)).border_color(text()))
+        })
         .child(icon(icon_path, size * 0.45, ink))
         .on_click(on_click)
 }

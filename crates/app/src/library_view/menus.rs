@@ -117,7 +117,7 @@ impl LibraryView {
         let trigger = theme::round_button_styled(
             "detail-more",
             "icons/more.svg",
-            44.,
+            theme::BUTTON_H,
             open,
             cx.listener(|this, _, _, cx| {
                 if this.more_menu {
