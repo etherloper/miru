@@ -401,10 +401,7 @@ impl LibraryView {
                 .text_color(theme::text())
                 .child(content)
         };
-        let certification = meta
-            .certification
-            .clone()
-            .map(|c| chip(div().child(c).into_any_element()));
+        let certification = meta.certification.as_deref().map(age_rating_badge);
         // IMDb, Rotten Tomatoes and Metacritic when OMDb has them (an OMDb key is set);
         // otherwise TMDB's audience score.
         // Rating badges sit bare beside the outlined age-rating chip.
@@ -785,4 +782,73 @@ fn brand_image(path: &'static str) -> impl IntoElement {
         .flex_shrink_0()
         .image_cache(gpui::retain_all(path))
         .child(gpui::img(path).size(px(16.)))
+}
+
+/// An age rating drawn the way its board shows it: the BBFC's coloured squares (U, PG, 12A,
+/// 12, 15, 18, R18), the US film ratings' black plates (G, PG, PG-13, R, NC-17), and the US
+/// TV ratings (TV-Y … TV-MA) in the same plate style. Anything else gets a plain outline.
+fn age_rating_badge(rating: &str) -> AnyElement {
+    let rating = rating.trim();
+    // BBFC: background, text colour.
+    let bbfc = match rating {
+        "U" => Some((0x0aa04f, 0xffffff)),
+        "PG" => Some((0xfbad00, 0x000000)),
+        "12A" | "12" => Some((0xf58025, 0xffffff)),
+        "15" => Some((0xe00a7f, 0xffffff)),
+        "18" => Some((0xdc1a22, 0xffffff)),
+        "R18" => Some((0x0d72b8, 0xffffff)),
+        _ => None,
+    };
+    if let Some((bg, ink)) = bbfc {
+        return div()
+            .h(px(22.))
+            .min_w(px(22.))
+            .px(px(if rating.len() > 2 { 4. } else { 0. }))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(5.))
+            .bg(gpui::rgb(bg))
+            .text_color(gpui::rgb(ink))
+            .text_size(px(if rating.len() > 2 { 11. } else { 13. }))
+            .font_weight(FontWeight::BLACK)
+            .child(rating.to_string())
+            .into_any_element();
+    }
+    let us = matches!(
+        rating,
+        "G" | "PG"
+            | "PG-13"
+            | "R"
+            | "NC-17"
+            | "TV-Y"
+            | "TV-Y7"
+            | "TV-G"
+            | "TV-PG"
+            | "TV-14"
+            | "TV-MA"
+    );
+    // US plates: white type on black with a white border; others: a quiet outline.
+    div()
+        .h(px(22.))
+        .px(px(6.))
+        .flex()
+        .items_center()
+        .rounded(px(if us { 3. } else { 6. }))
+        .border(px(if us { 1.5 } else { 1. }))
+        .border_color(if us {
+            gpui::rgb(0xffffff).into()
+        } else {
+            rgba(0xffffff4d)
+        })
+        .when(us, |d| d.bg(gpui::rgb(0x000000)))
+        .text_color(theme::text())
+        .text_size(px(11.))
+        .font_weight(if us {
+            FontWeight::BLACK
+        } else {
+            FontWeight::SEMIBOLD
+        })
+        .child(rating.to_string())
+        .into_any_element()
 }
