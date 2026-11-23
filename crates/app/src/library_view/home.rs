@@ -126,6 +126,7 @@ impl LibraryView {
                     .mt_4()
                     .flex()
                     .gap_3()
+                    .group(theme::BUTTON_ROW)
                     .child(primary)
                     .child(glass_button(
                         "hero-info",
