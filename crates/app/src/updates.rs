@@ -181,8 +181,9 @@ pub fn download(release: &Release, dir: &Path, progress: impl Fn(f32)) -> Result
 }
 
 /// Runs the installer in its passive mode (`/P`): a small progress window and no questions;
-/// it closes Miru if it is still running, installs, and with `/R` starts the new version. The
-/// caller quits straight after.
+/// it closes Miru if it is still running, installs, and with `/R` starts the new version.
+/// `/NS` stops it recreating the desktop shortcut on every update (an existing one keeps
+/// working, and one you deleted stays gone). The caller quits straight after.
 ///
 /// The installer is started directly and stays visible. 0.1.7, which started it hidden through
 /// PowerShell, was flagged by Defender: an app that downloads a program and runs it invisibly
@@ -190,7 +191,7 @@ pub fn download(release: &Release, dir: &Path, progress: impl Fn(f32)) -> Result
 #[cfg(windows)]
 pub fn open_installer(installer: &Path) -> Result<()> {
     std::process::Command::new(installer)
-        .args(["/P", "/R"])
+        .args(["/P", "/R", "/NS"])
         .spawn()
         .context("starting the installer")?;
     Ok(())
