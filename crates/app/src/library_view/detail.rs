@@ -161,7 +161,6 @@ impl LibraryView {
                 if seasons.len() == 1 { "" } else { "s" }
             ),
             format!("{} episodes", episodes.len()),
-            format!("{watched} watched"),
         ]);
 
         let mut actions: Vec<AnyElement> = Vec::new();
