@@ -10,6 +10,17 @@ use crate::text_edit::{self, KeyOutcome, TextEdit};
 /// How long a collection's sidebar row glows after a title lands in it.
 pub(super) const COLLECTION_FLASH: Duration = Duration::from_millis(900);
 
+/// Group on each sidebar collection row: hovering it swaps the title count for a ⋯ button.
+const ROW_GROUP: &str = "collection-row";
+
+/// The menu for a collection opened from the sidebar (⋯ or right-click).
+pub(super) struct CollectionMenu {
+    pub id: i64,
+    pub position: Point<Pixels>,
+    /// Showing the delete confirmation instead of the options.
+    pub confirming: bool,
+}
+
 /// A collection being named in the sidebar.
 pub(super) struct CollectionEdit {
     pub id: i64,
@@ -208,6 +219,140 @@ impl LibraryView {
         }
         self.reload_collections();
         cx.notify();
+    }
+
+    fn open_collection_menu(&mut self, id: i64, position: Point<Pixels>, cx: &mut Context<Self>) {
+        let open_here = self.collection_menu.as_ref().is_some_and(|m| m.id == id);
+        // The press that opened this also closed the same menu (a press outside it): leave it
+        // closed, so the ⋯ button toggles. Another collection's menu opens straight away.
+        let just_closed_here = self.collection_menu_closed_id == Some(id)
+            && self.collection_menu_closed.elapsed() < Duration::from_millis(200);
+        if open_here || just_closed_here {
+            self.close_collection_menu();
+        } else {
+            self.close_card_menu();
+            self.last_collection_menu_at = Some(position);
+            self.collection_menu = Some(CollectionMenu {
+                id,
+                position,
+                confirming: false,
+            });
+        }
+        cx.notify();
+    }
+
+    pub(super) fn close_collection_menu(&mut self) {
+        if let Some(menu) = self.collection_menu.take() {
+            self.collection_menu_closed = Instant::now();
+            self.collection_menu_closed_id = Some(menu.id);
+        }
+    }
+
+    /// The sidebar collection menu: Open, Rename and Delete, with Delete asking first.
+    pub(super) fn render_collection_menu(&self, cx: &mut Context<Self>) -> AnyElement {
+        let Some(menu) = &self.collection_menu else {
+            return theme::nothing();
+        };
+        let Some(collection) = self.collection(menu.id) else {
+            return theme::nothing();
+        };
+        let id = menu.id;
+        let panel: AnyElement = if menu.confirming {
+            div()
+                .id("collection-delete-confirm-panel")
+                .occlude()
+                .w(px(280.))
+                .p_4()
+                .flex()
+                .flex_col()
+                .gap_3()
+                .rounded(px(14.))
+                .bg(theme::panel())
+                .border_1()
+                .border_color(theme::glass_border())
+                .shadow(theme::frost_shadow())
+                .child(
+                    div()
+                        .text_sm()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child(format!("Delete “{}”?", collection.name)),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(theme::text_secondary())
+                        .child("The titles stay in your library."),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .justify_end()
+                        .gap_2()
+                        .child(small_button(
+                            "collection-menu-cancel",
+                            "Cancel",
+                            false,
+                            cx.listener(|this, _, _, cx| {
+                                this.close_collection_menu();
+                                cx.notify();
+                            }),
+                        ))
+                        .child(small_button(
+                            "collection-menu-delete",
+                            "Delete",
+                            true,
+                            cx.listener(move |this, _, _, cx| {
+                                this.close_collection_menu();
+                                this.delete_collection(id, cx);
+                            }),
+                        )),
+                )
+                .on_mouse_down_out(cx.listener(|this, _, _, cx| {
+                    this.close_collection_menu();
+                    cx.notify();
+                }))
+                .into_any_element()
+        } else {
+            let entries = vec![
+                MenuEntry::new("Open", "icons/collection.svg", move |this, _, cx| {
+                    this.open_collection(id, cx)
+                }),
+                MenuEntry::new("Rename", "icons/pencil.svg", move |this, _, cx| {
+                    this.start_rename(id, cx)
+                }),
+                MenuEntry::new(
+                    "Delete collection",
+                    "icons/trash.svg",
+                    move |this, _, cx| {
+                        // Reopen the menu as its confirmation, in the same place.
+                        if let Some(position) = this.last_collection_menu_at {
+                            this.collection_menu = Some(CollectionMenu {
+                                id,
+                                position,
+                                confirming: true,
+                            });
+                        }
+                        cx.notify();
+                    },
+                )
+                .divided(),
+            ];
+            self.menu_panel(
+                "collection-menu",
+                entries,
+                |this| this.close_collection_menu(),
+                cx,
+            )
+            .into_any_element()
+        };
+        gpui::deferred(
+            gpui::anchored()
+                .position(menu.position)
+                .snap_to_window_with_margin(px(12.))
+                .child(div().mt_1().child(panel)),
+        )
+        .with_priority(2)
+        .into_any_element()
     }
 
     /// "Add to …" / "Remove from …" for each collection, and "New collection…".
@@ -488,17 +633,72 @@ impl LibraryView {
                             |el, t| el.opacity(1. - t),
                         )
                 }))
+                .group(ROW_GROUP)
                 .child(icon("icons/collection.svg", 18., ink))
                 .when(!collapsed, |d| {
                     d.child(label).when(editing.is_none(), |d| {
+                        // The count, swapped for a ⋯ button while the row is hovered.
                         d.child(
                             div()
-                                .text_xs()
-                                .text_color(theme::text_tertiary())
-                                .child(c.item_count.to_string()),
+                                .relative()
+                                .flex_shrink_0()
+                                .min_w(px(22.))
+                                .h(px(22.))
+                                .flex()
+                                .items_center()
+                                .justify_end()
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(theme::text_tertiary())
+                                        .group_hover(ROW_GROUP, |s| s.opacity(0.))
+                                        .child(c.item_count.to_string()),
+                                )
+                                .when(!dragging, |d| {
+                                    d.child(
+                                        div()
+                                            .id(("collection-more", id as usize))
+                                            .absolute()
+                                            .top_0()
+                                            .right(px(-4.))
+                                            .size(px(22.))
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .opacity(0.)
+                                            .group_hover(ROW_GROUP, |s| s.opacity(1.))
+                                            .child(
+                                                svg()
+                                                    .path("icons/more.svg")
+                                                    .size(px(14.))
+                                                    .text_color(theme::text_secondary())
+                                                    .hover(|s| s.text_color(theme::text())),
+                                            )
+                                            .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
+                                                cx.stop_propagation()
+                                            })
+                                            .on_click(cx.listener(
+                                                move |this, event: &ClickEvent, _, cx| {
+                                                    cx.stop_propagation();
+                                                    this.open_collection_menu(
+                                                        id,
+                                                        event.position(),
+                                                        cx,
+                                                    );
+                                                },
+                                            )),
+                                    )
+                                }),
                         )
                     })
                 })
+                // Right-click works with the sidebar collapsed too.
+                .on_mouse_down(
+                    gpui::MouseButton::Right,
+                    cx.listener(move |this, event: &gpui::MouseDownEvent, _, cx| {
+                        this.open_collection_menu(id, event.position, cx)
+                    }),
+                )
                 .when(collapsed, |d| {
                     d.children(self.side_label(&format!("collection-{id}"), c.name.clone()))
                 })

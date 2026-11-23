@@ -46,7 +46,7 @@ mod search;
 mod settings_page;
 mod sidebar;
 
-use collections::{CardMenu, CollectionEdit};
+use collections::{CardMenu, CollectionEdit, CollectionMenu};
 use detail::*;
 use grid::*;
 use menus::MenuEntry;
@@ -325,6 +325,10 @@ pub struct LibraryView {
     /// A collection whose delete is waiting for confirmation.
     collection_delete: Option<i64>,
     card_menu: Option<CardMenu>,
+    collection_menu: Option<CollectionMenu>,
+    collection_menu_closed: Instant,
+    collection_menu_closed_id: Option<i64>,
+    last_collection_menu_at: Option<gpui::Point<gpui::Pixels>>,
     card_menu_closed: Instant,
     poster_drag: Option<PosterDrag>,
     poster_press_epoch: usize,
@@ -469,6 +473,10 @@ impl LibraryView {
             collection_flash_epoch: 0,
             collection_delete: None,
             card_menu: None,
+            collection_menu: None,
+            collection_menu_closed: Instant::now(),
+            collection_menu_closed_id: None,
+            last_collection_menu_at: None,
             card_menu_closed: Instant::now(),
             poster_drag: None,
             poster_press_epoch: 0,
@@ -1033,6 +1041,7 @@ impl LibraryView {
         self.cast_pane = None;
         self.close_more_menu();
         self.close_card_menu();
+        self.close_collection_menu();
         self.collection_delete = None;
         let same_tab = matches!((&self.page, &page), (Page::Browse(a), Page::Browse(b)) if a == b);
         if !same_tab {
@@ -1387,6 +1396,10 @@ impl LibraryView {
                 self.close_card_menu();
                 cx.notify();
             }
+            "escape" if self.collection_menu.is_some() => {
+                self.close_collection_menu();
+                cx.notify();
+            }
             "escape" if self.collection_delete.is_some() => {
                 self.collection_delete = None;
                 cx.notify();
@@ -1639,6 +1652,7 @@ impl Render for LibraryView {
             .child(self.render_cast_pane(cx))
             .child(self.render_fix_match(window, cx))
             .child(self.render_card_menu(cx))
+            .child(self.render_collection_menu(cx))
             .child(self.render_poster_drag());
         // Building the element tree should take a few milliseconds; report slow frames.
         let took = render_started.elapsed();
