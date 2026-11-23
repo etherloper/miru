@@ -491,7 +491,9 @@ impl LibraryView {
             UpdateState::UpToDate => ("You're up to date".into(), checked, None),
             UpdateState::Available(release) => (
                 format!("Version {} is available", release.version),
-                first_line(&release.notes).unwrap_or_else(|| format!("You have {current}.")),
+                // Release notes are GitHub markdown (e.g. a "Full Changelog" link), which reads
+                // badly as plain text.
+                format!("You have {current}."),
                 None,
             ),
             UpdateState::Downloading { release, progress } => (
@@ -651,15 +653,6 @@ impl LibraryView {
             .into_any_element(),
         )
     }
-}
-
-/// The first non-empty line of release notes.
-fn first_line(notes: &str) -> Option<String> {
-    notes
-        .lines()
-        .map(str::trim)
-        .find(|l| !l.is_empty())
-        .map(str::to_string)
 }
 
 /// "Last checked 3 hours ago." from a unix time (0 = never).
