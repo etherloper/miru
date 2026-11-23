@@ -382,17 +382,6 @@ impl LibraryView {
             .h(px(NAV_HEIGHT))
             .flex()
             .items_start()
-            // A faint dark strip across the top, the height of the window controls, so they and
-            // the frame read clearly over bright artwork.
-            .child(
-                div()
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .right_0()
-                    .h(px(40.))
-                    .bg(rgba(0x00000066)),
-            )
             .child(
                 div()
                     .flex_1()
@@ -420,7 +409,13 @@ impl LibraryView {
                     })
                     .child(div().truncate().child(text))
             }))
-            .child(theme::window_controls())
+            .child(
+                // A soft pill behind the window controls keeps them legible over bright art.
+                div()
+                    .rounded_bl(px(12.))
+                    .bg(rgba(0x00000080))
+                    .child(theme::window_controls()),
+            )
     }
 
     pub(super) fn render_empty(&self, cx: &mut Context<Self>) -> impl IntoElement {
