@@ -40,39 +40,6 @@ impl AudioOutput {
     }
 }
 
-/// Light or dark look, or following Windows.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Appearance {
-    #[default]
-    System,
-    Light,
-    Dark,
-}
-
-impl Appearance {
-    pub const ALL: [Self; 3] = [Self::System, Self::Light, Self::Dark];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::System => "System",
-            Self::Light => "Light",
-            Self::Dark => "Dark",
-        }
-    }
-
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::System => "system",
-            Self::Light => "light",
-            Self::Dark => "dark",
-        }
-    }
-
-    fn parse(s: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|v| v.as_str() == s)
-    }
-}
-
 /// Size of text subtitles, relative to mpv's default.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SubtitleSize {
@@ -245,7 +212,6 @@ pub struct Settings {
     pub autoplay_next: bool,
     /// Sidebar shows icons only.
     pub sidebar_collapsed: bool,
-    pub appearance: Appearance,
     pub movie_sort: LibrarySort,
     pub show_sort: LibrarySort,
     /// Player volume (0–100), kept from one video to the next.
@@ -272,7 +238,6 @@ impl Default for Settings {
             sidebar_order: NavItem::ALL.to_vec(),
             autoplay_next: true,
             sidebar_collapsed: false,
-            appearance: Appearance::System,
             movie_sort: LibrarySort::Title,
             show_sort: LibrarySort::Title,
             volume: 100,
@@ -294,7 +259,6 @@ const WHOLE_LIBRARY: &str = "home.feature_whole_library";
 const SIDEBAR_ORDER: &str = "ui.sidebar_order";
 const AUTOPLAY: &str = "playback.autoplay_next";
 const SIDEBAR: &str = "ui.sidebar_collapsed";
-const APPEARANCE: &str = "ui.appearance";
 const PARSER_VERSION_KEY: &str = "scan.parser_version";
 const MOVIE_SORT: &str = "library.movie_sort";
 const SHOW_SORT: &str = "library.show_sort";
@@ -343,10 +307,6 @@ impl Db {
                 .map_or(defaults.sidebar_order, |v| NavItem::parse_order(&v)),
             autoplay_next: bool_of(self.setting(AUTOPLAY)?, defaults.autoplay_next),
             sidebar_collapsed: bool_of(self.setting(SIDEBAR)?, defaults.sidebar_collapsed),
-            appearance: self
-                .setting(APPEARANCE)?
-                .and_then(|v| Appearance::parse(&v))
-                .unwrap_or_default(),
             movie_sort: self
                 .setting(MOVIE_SORT)?
                 .and_then(|v| LibrarySort::parse(&v))
@@ -392,7 +352,6 @@ impl Db {
             ),
             (AUTOPLAY, s.autoplay_next.to_string()),
             (SIDEBAR, s.sidebar_collapsed.to_string()),
-            (APPEARANCE, s.appearance.as_str().to_string()),
             (MOVIE_SORT, s.movie_sort.as_str().to_string()),
             (SHOW_SORT, s.show_sort.as_str().to_string()),
             (VOLUME, s.volume.to_string()),
@@ -495,7 +454,6 @@ mod tests {
             ],
             autoplay_next: false,
             sidebar_collapsed: true,
-            appearance: Appearance::Light,
             movie_sort: LibrarySort::Newest,
             show_sort: LibrarySort::RecentlyAdded,
             volume: 40,

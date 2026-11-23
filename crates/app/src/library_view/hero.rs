@@ -33,11 +33,6 @@ pub(super) struct Hero {
 }
 
 impl Hero {
-    /// Redraws the hero on the next frame (e.g. after the palette changes).
-    pub fn invalidate(&self) {
-        *self.drawn.borrow_mut() = None;
-    }
-
     pub fn view(&self) -> &Entity<HeroView> {
         &self.view
     }

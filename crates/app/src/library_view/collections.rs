@@ -389,7 +389,7 @@ impl LibraryView {
                 .child(div().flex_1().child("COLLECTIONS"))
                 .child(add)
         });
-        let divider = collapsed.then(|| div().mx_5().my_3().h(px(1.)).bg(theme::overlay(0x0f)));
+        let divider = collapsed.then(|| div().mx_5().my_3().h(px(1.)).bg(rgba(0xffffff0f)));
 
         let rows = self.collections.iter().map(|c| {
             let selected = matches!(self.page, Page::Collection { id, .. } if id == c.id);
@@ -414,9 +414,9 @@ impl LibraryView {
                             .flex()
                             .items_center()
                             .rounded(px(6.))
-                            .bg(theme::overlay(0x0f))
+                            .bg(rgba(0xffffff0f))
                             .border_1()
-                            .border_color(theme::overlay(0x40))
+                            .border_color(rgba(0xffffff40))
                             .cursor_text()
                             .track_focus(&self.collection_focus)
                             .on_key_down(cx.listener(Self::on_collection_key))
@@ -462,18 +462,17 @@ impl LibraryView {
                 .gap_3()
                 .rounded(px(8.))
                 .border_1()
-                .border_color(theme::overlay(0x00))
+                .border_color(rgba(0xffffff00))
                 .cursor_pointer()
                 .text_sm()
                 .font_weight(FontWeight::MEDIUM)
                 .text_color(ink)
-                .when(selected, |d| d.bg(theme::overlay(0x0f)))
+                .when(selected, |d| d.bg(rgba(0xffffff0f)))
                 .when(!selected && !dragging, |d| {
                     d.hover(|s| s.text_color(theme::text()))
                 })
                 .when(hovered, |d| {
-                    d.bg(theme::overlay(0x1a))
-                        .border_color(theme::overlay(0x59))
+                    d.bg(rgba(0xffffff1a)).border_color(rgba(0xffffff59))
                 })
                 // A glow that fades after a title lands here.
                 .children(flash.map(|epoch| {
@@ -481,7 +480,7 @@ impl LibraryView {
                         .absolute()
                         .inset_0()
                         .rounded(px(8.))
-                        .bg(theme::overlay(0x33))
+                        .bg(rgba(0xffffff33))
                         .with_animation(
                             ("collection-flash", epoch),
                             Animation::new(theme::motion(COLLECTION_FLASH.as_millis() as u64))
@@ -536,11 +535,11 @@ impl LibraryView {
                 .border_1()
                 .border_dashed()
                 .border_color(if hovered {
-                    theme::overlay(0x8c)
+                    rgba(0xffffff8c)
                 } else {
-                    theme::overlay(0x33)
+                    rgba(0xffffff33)
                 })
-                .when(hovered, |d| d.bg(theme::overlay(0x1a)))
+                .when(hovered, |d| d.bg(rgba(0xffffff1a)))
                 .text_sm()
                 .font_weight(FontWeight::MEDIUM)
                 .text_color(if hovered {
@@ -649,7 +648,7 @@ impl LibraryView {
                 .items_center()
                 .gap_4()
                 .rounded(px(12.))
-                .bg(theme::overlay(0x0a))
+                .bg(rgba(0xffffff0a))
                 .border_1()
                 .border_color(theme::glass_border())
                 .child(div().flex_1().text_sm().child(format!(

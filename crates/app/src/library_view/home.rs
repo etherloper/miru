@@ -118,7 +118,7 @@ impl LibraryView {
                     .mt_1()
                     .max_w(px(540.))
                     .line_clamp(3)
-                    .text_color(theme::text_soft())
+                    .text_color(rgba(0xe8e8edff))
                     .child(o)
             }))
             .child(
@@ -162,7 +162,7 @@ impl LibraryView {
                         .bg(if active {
                             theme::text()
                         } else {
-                            theme::overlay(0x59)
+                            rgba(0xffffff59)
                         })
                         .hover(|s| s.bg(theme::text()))
                         .on_click(cx.listener(move |hero: &mut HeroView, _, _, cx| {
@@ -235,20 +235,20 @@ impl LibraryView {
             // Scrims: left for legibility, bottom to melt into the page.
             .child(div().absolute().inset_0().bg(linear_gradient(
                 90.,
-                linear_color_stop(theme::page(0xe6), 0.),
-                linear_color_stop(theme::page(0), 0.65),
+                linear_color_stop(rgba(0x000000e6), 0.),
+                linear_color_stop(rgba(0x00000000), 0.65),
             )))
             // Bottom fade into the page, eased by layering a short solid fade and a long soft one
             // (a single two-stop fade leaves a line where it turns solid).
             .child(div().absolute().inset_0().bg(linear_gradient(
                 0.,
                 linear_color_stop(theme::bg(), 0.),
-                linear_color_stop(theme::page(0), 0.25),
+                linear_color_stop(rgba(0x00000000), 0.25),
             )))
             .child(div().absolute().inset_0().bg(linear_gradient(
                 0.,
-                linear_color_stop(theme::page(0xb3), 0.),
-                linear_color_stop(theme::page(0), 0.55),
+                linear_color_stop(rgba(0x000000b3), 0.),
+                linear_color_stop(rgba(0x00000000), 0.55),
             )))
             .child(copy)
             .children(dots)
@@ -335,11 +335,11 @@ impl LibraryView {
             let group = SharedString::from(format!("{id}-{side}-arrow"));
             // Gradient angles point away from the window edge.
             let angle = if direction < 0. { 90. } else { 270. };
-            let scrim = move |edge: u8| {
+            let scrim = move |edge: u32| {
                 linear_gradient(
                     angle,
-                    linear_color_stop(theme::page(edge), 0.),
-                    linear_color_stop(theme::page(0), 1.),
+                    linear_color_stop(rgba(edge), 0.),
+                    linear_color_stop(rgba(0x00000000), 1.),
                 )
             };
             div()
@@ -356,8 +356,8 @@ impl LibraryView {
                 // card reveals more text, and a centred chevron would jump with it.
                 .items_start()
                 .pt(px(arrow_top))
-                .bg(scrim(0xf2))
-                .hover(move |s| s.bg(scrim(0xff)))
+                .bg(scrim(0x000000f2))
+                .hover(move |s| s.bg(scrim(0x000000ff)))
                 .cursor_pointer()
                 .child(
                     // A fixed box, so the chevron grows about its centre on hover.
@@ -398,7 +398,7 @@ impl LibraryView {
                 .bg(linear_gradient(
                     angle,
                     linear_color_stop(theme::bg(), 0.),
-                    linear_color_stop(theme::page(0), 1.),
+                    linear_color_stop(rgba(0x00000000), 1.),
                 ))
         };
 

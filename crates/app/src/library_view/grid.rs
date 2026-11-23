@@ -286,7 +286,7 @@ impl LibraryView {
                 } else {
                     theme::text_secondary()
                 })
-                .hover(|s| s.bg(theme::overlay(0x14)).text_color(theme::text()))
+                .hover(|s| s.bg(rgba(0xffffff14)).text_color(theme::text()))
                 .child(
                     div()
                         .w(px(14.))

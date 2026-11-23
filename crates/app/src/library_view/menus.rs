@@ -63,7 +63,7 @@ impl LibraryView {
                 .text_sm()
                 .text_color(theme::text_secondary())
                 .cursor_pointer()
-                .hover(|s| s.bg(theme::overlay(0x14)).text_color(theme::text()))
+                .hover(|s| s.bg(rgba(0xffffff14)).text_color(theme::text()))
                 .child(icon(entry.icon, 15., theme::text_secondary()))
                 .child(div().min_w_0().truncate().child(entry.label))
                 .on_click(cx.listener(move |this, _, window, cx| {
@@ -75,7 +75,7 @@ impl LibraryView {
                 div()
                     .flex()
                     .flex_col()
-                    .child(div().mx_2().my_1().h(px(1.)).bg(theme::overlay(0x12)))
+                    .child(div().mx_2().my_1().h(px(1.)).bg(rgba(0xffffff12)))
                     .child(row)
                     .into_any_element()
             } else {

@@ -19,8 +19,7 @@ use miru_core::library::{ItemKind, LibraryItem, Metadata, TitleKey};
 use miru_core::parse::ParsedMedia;
 use miru_core::playback::{ContinueReason, Progress};
 use miru_core::settings::{
-    Appearance, AudioOutput, LibrarySort, RootStats, SEEK_STEPS, Settings, SubtitleSize,
-    title_sort_key,
+    AudioOutput, LibrarySort, RootStats, SEEK_STEPS, Settings, SubtitleSize, title_sort_key,
 };
 use miru_metadata::Tmdb;
 use miru_player::format_time;
@@ -337,8 +336,6 @@ pub struct LibraryView {
     /// Sidebar-order rows' eased offsets while reordering.
     nav_shift: Vec<f32>,
     nav_frame: Instant,
-    /// The palette the cached views (cards, hero) were drawn with.
-    palette: theme::Palette,
     /// Watches the library folders; a change while a scan runs queues another one.
     folder_watch: Option<crate::folder_watch::FolderWatch>,
     rescan_pending: bool,
@@ -477,7 +474,6 @@ impl LibraryView {
             nav_drag: None,
             nav_shift: Vec::new(),
             nav_frame: Instant::now(),
-            palette: theme::Palette::Dark,
             folder_watch: None,
             rescan_pending: false,
             update: Default::default(),
@@ -1070,27 +1066,6 @@ impl LibraryView {
         }
     }
 
-    /// Sets the palette for this frame from Settings → Appearance (System follows Windows).
-    /// Cached views drawn with the other palette are dropped so they redraw.
-    fn apply_palette(&mut self, window: &Window) {
-        let palette = match self.settings.appearance {
-            Appearance::Light => theme::Palette::Light,
-            Appearance::Dark => theme::Palette::Dark,
-            Appearance::System => match window.appearance() {
-                gpui::WindowAppearance::Light | gpui::WindowAppearance::VibrantLight => {
-                    theme::Palette::Light
-                }
-                _ => theme::Palette::Dark,
-            },
-        };
-        theme::set_palette(palette);
-        if palette != self.palette {
-            self.palette = palette;
-            self.cards.clear();
-            self.hero.invalidate();
-        }
-    }
-
     /// Called by the shell when playback starts or stops, so background animation pauses.
     pub fn set_playing(&mut self, playing: bool) {
         self.playing = playing;
@@ -1513,7 +1488,6 @@ fn art_layer(path: Option<String>, radius: f32, max_width: u32) -> AnyElement {
 impl Render for LibraryView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let render_started = Instant::now();
-        self.apply_palette(window);
         self.step_shelf_glide(window);
         self.step_poster_drag(window);
         if matches!(self.page, Page::Settings) {

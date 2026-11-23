@@ -413,7 +413,7 @@ impl LibraryView {
             .h(px(40.))
             .px_5()
             .border_t_1()
-            .border_color(theme::overlay(0x0d))
+            .border_color(rgba(0xffffff0d))
             .flex()
             .items_center()
             .gap_5()
@@ -442,19 +442,14 @@ impl LibraryView {
             .flex()
             .flex_col()
             .child(field)
-            .children(results.map(|r| {
-                div()
-                    .border_t_1()
-                    .border_color(theme::overlay(0x0d))
-                    .child(r)
-            }))
+            .children(results.map(|r| div().border_t_1().border_color(rgba(0xffffff0d)).child(r)))
             .child(footer);
 
         div()
             .id("search-overlay")
             .absolute()
             .inset_0()
-            .bg(theme::backdrop())
+            .bg(rgba(0x00000099))
             .flex()
             .justify_center()
             // Top-aligned: the panel keeps its natural height instead of stretching.
@@ -552,7 +547,7 @@ impl LibraryView {
             .rounded(px(8.))
             .cursor_pointer()
             // Hovering moves the selection, so the selected fill doubles as the hover state.
-            .when(selected, |d| d.bg(theme::overlay(0x14)))
+            .when(selected, |d| d.bg(rgba(0xffffff14)))
             .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
                 if *hovered && this.search_selected != ix {
                     this.search_selected = ix;

@@ -315,12 +315,7 @@ fn carry_card(
         .overflow_hidden()
         .bg(theme::placeholder(&art.title, art.accent))
         .border_1()
-        .border_color(gpui::Rgba {
-            r: 1.,
-            g: 1.,
-            b: 1.,
-            a: 0.2,
-        })
+        .border_color(rgba(0xffffff33))
         .shadow(theme::card_shadow(1.))
         .child(match &art.poster {
             Some(path) => art_image(path.clone(), ART_POSTER)
@@ -335,7 +330,6 @@ fn carry_card(
                 .items_end()
                 .text_xs()
                 .font_weight(FontWeight::BOLD)
-                .text_color(theme::on_image())
                 .child(art.title.clone())
                 .into_any_element(),
         });

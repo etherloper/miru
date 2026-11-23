@@ -2,11 +2,7 @@
 //!
 //! The look: a deep neutral canvas, full-bleed artwork, frosted translucent surfaces, white
 //! primary actions, and a single violet accent used sparingly.
-//!
-//! Colours come from the current palette, dark or light (Settings → Appearance). The library
-//! sets it at the start of each frame; the video player always draws with the dark one.
 
-use std::cell::Cell;
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -22,81 +18,17 @@ pub const FONT: &str = "Segoe UI Variable Text";
 
 pub const RADIUS_CARD: f32 = 12.;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Palette {
-    Dark,
-    Light,
-}
-
-thread_local! {
-    static PALETTE: Cell<Palette> = const { Cell::new(Palette::Dark) };
-}
-
-pub fn palette() -> Palette {
-    PALETTE.with(Cell::get)
-}
-
-/// Sets the palette for what is drawn next. Returns whether it changed.
-pub fn set_palette(palette: Palette) -> bool {
-    PALETTE.with(|p| p.replace(palette) != palette)
-}
-
-pub fn is_light() -> bool {
-    palette() == Palette::Light
-}
-
-/// Draws with the dark palette until dropped (the video player, which sits on video).
-pub struct ForceDark(Palette);
-
-pub fn force_dark() -> ForceDark {
-    ForceDark(PALETTE.with(|p| p.replace(Palette::Dark)))
-}
-
-impl Drop for ForceDark {
-    fn drop(&mut self) {
-        PALETTE.with(|p| p.set(self.0));
-    }
-}
-
-/// Picks the dark or light value.
-fn pick(dark: u32, light: u32) -> Rgba {
-    if is_light() { rgba(light) } else { rgba(dark) }
-}
-
 pub fn bg() -> Rgba {
-    pick(0x000000ff, 0xfafafaff)
+    rgb(0x000000)
 }
 pub fn text() -> Rgba {
-    pick(0xf5f5f7ff, 0x111114ff)
-}
-pub fn text_secondary() -> Rgba {
-    pick(0xa1a1abff, 0x55555eff)
-}
-pub fn text_tertiary() -> Rgba {
-    pick(0x6e6e78ff, 0x8a8a93ff)
-}
-/// Text over artwork and dark scrims: white in either palette.
-pub fn on_image() -> Rgba {
     rgb(0xf5f5f7)
 }
-/// Slightly softer than `text` (resting card captions, synopsis).
-pub fn text_soft() -> Rgba {
-    pick(0xe8e8edff, 0x2a2a30ff)
+pub fn text_secondary() -> Rgba {
+    rgb(0xa1a1ab)
 }
-/// The page colour at `alpha` (0–255), for fades and scrims that melt into the page.
-pub fn page(alpha: u8) -> Rgba {
-    let base = if is_light() { 0xfafafa00 } else { 0x00000000 };
-    rgba(base | u32::from(alpha))
-}
-/// Dims the page behind a modal panel.
-pub fn backdrop() -> Rgba {
-    pick(0x00000099, 0x0000004d)
-}
-/// A tint of the text colour: white on the dark palette, black on the light one. `alpha` is
-/// 0–255 (e.g. 0x14 for a hover fill).
-pub fn overlay(alpha: u8) -> Rgba {
-    let base = if is_light() { 0x00000000 } else { 0xffffff00 };
-    rgba(base | u32::from(alpha))
+pub fn text_tertiary() -> Rgba {
+    rgb(0x6e6e78)
 }
 /// Brand accent: a moonlit violet. Used for small highlights only.
 pub fn accent() -> Rgba {
@@ -104,17 +36,16 @@ pub fn accent() -> Rgba {
 }
 /// Translucent "glass" fill for controls over artwork.
 pub fn glass() -> Rgba {
-    overlay(0x1f)
+    rgba(0xffffff1f)
 }
 pub fn glass_hover() -> Rgba {
-    overlay(0x33)
+    rgba(0xffffff33)
 }
 pub fn glass_border() -> Rgba {
-    overlay(0x1a)
+    rgba(0xffffff1a)
 }
-/// Menus, popovers and other raised surfaces.
 pub fn panel() -> Rgba {
-    pick(0x1c1c22f2, 0xfffffffa)
+    rgba(0x1c1c22f2)
 }
 
 pub fn card_shadow(lift: f32) -> Vec<BoxShadow> {
@@ -131,11 +62,7 @@ pub fn card_shadow(lift: f32) -> Vec<BoxShadow> {
 /// it only shows for keyboard navigation, not mouse clicks.
 pub fn focus_ring(style: gpui::StyleRefinement) -> gpui::StyleRefinement {
     style.shadow(vec![BoxShadow {
-        color: if is_light() {
-            hsla(0., 0., 0., 0.85)
-        } else {
-            hsla(0., 0., 1., 0.95)
-        },
+        color: hsla(0., 0., 1., 0.95),
         offset: point(px(0.), px(0.)),
         blur_radius: px(0.),
         spread_radius: px(3.),
@@ -241,20 +168,12 @@ type ClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 
 /// Height shared by the pill buttons and the round buttons beside them.
 pub const BUTTON_H: f32 = 48.;
-/// Apple TV style buttons: the focused (hovered) one is solid (white, or near-black on the
-/// light palette); the rest are smoked glass with a faint rim.
-fn smoke() -> Rgba {
-    pick(0x0000006b, 0x0000000f)
-}
-fn smoke_rim() -> Rgba {
-    pick(0xffffff33, 0x0000001f)
-}
-fn focus_fill() -> Rgba {
-    pick(0xf5f5f7ff, 0x111114ff)
-}
-fn focus_ink() -> Rgba {
-    pick(0x0b0b0fff, 0xfafafaff)
-}
+/// Apple TV style buttons: the focused (hovered) one is white; the rest are smoked glass, a
+/// see-through black with a faint light rim.
+const SMOKE: u32 = 0x0000006b;
+const SMOKE_RIM: u32 = 0xffffff33;
+const WHITE: u32 = 0xf5f5f7ff;
+const INK: u32 = 0x0b0b0fff;
 /// Group on each button, so its icon can turn dark while the button is hovered.
 const BUTTON_GROUP: &str = "button";
 
@@ -277,13 +196,13 @@ pub fn glass_button(
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> Stateful<Div> {
     button_base(id, icon_path, label.into(), Box::new(on_click))
-        .bg(smoke())
-        .border_color(smoke_rim())
+        .bg(rgba(SMOKE))
+        .border_color(rgba(SMOKE_RIM))
         .text_color(text())
         .hover(|s| {
-            s.bg(focus_fill())
-                .border_color(focus_fill())
-                .text_color(focus_ink())
+            s.bg(rgba(WHITE))
+                .border_color(rgba(WHITE))
+                .text_color(rgba(INK))
                 .shadow(card_shadow(0.2))
         })
 }
@@ -306,7 +225,7 @@ fn button_icon(path: &'static str, size: f32) -> Div {
         .flex_shrink_0()
         .child(layer(text()))
         .child(
-            layer(focus_ink())
+            layer(rgba(INK))
                 .opacity(0.)
                 .group_hover(BUTTON_GROUP, |s| s.opacity(1.)),
         )
@@ -373,18 +292,16 @@ pub fn round_button_styled(
         .cursor_pointer()
         .border_1()
         .when(selected, |d| {
-            d.bg(focus_fill()).border_color(focus_fill()).child(icon(
-                icon_path,
-                icon_size,
-                focus_ink(),
-            ))
+            d.bg(rgba(WHITE))
+                .border_color(rgba(WHITE))
+                .child(icon(icon_path, icon_size, rgba(INK)))
         })
         .when(!selected, |d| {
-            d.bg(smoke())
-                .border_color(smoke_rim())
+            d.bg(rgba(SMOKE))
+                .border_color(rgba(SMOKE_RIM))
                 .hover(|s| {
-                    s.bg(focus_fill())
-                        .border_color(focus_fill())
+                    s.bg(rgba(WHITE))
+                        .border_color(rgba(WHITE))
                         .shadow(card_shadow(0.2))
                 })
                 .child(button_icon(icon_path, icon_size))
@@ -569,29 +486,13 @@ pub fn window_controls() -> impl IntoElement {
         ))
 }
 
-/// Thin progress bar over artwork: white in either palette.
-pub fn progress_bar_on_image(fraction: f32, height: f32) -> impl IntoElement {
-    div()
-        .h(px(height))
-        .w_full()
-        .rounded_full()
-        .bg(rgba(0xffffff33))
-        .child(
-            div()
-                .h_full()
-                .w(gpui::relative(fraction.clamp(0., 1.)))
-                .rounded_full()
-                .bg(on_image()),
-        )
-}
-
-/// Thin progress track filled with the text colour.
+/// Thin progress track with a white fill.
 pub fn progress_bar(fraction: f32, height: f32) -> impl IntoElement {
     div()
         .h(px(height))
         .w_full()
         .rounded_full()
-        .bg(overlay(0x33))
+        .bg(rgba(0xffffff33))
         .child(
             div()
                 .h_full()
@@ -615,7 +516,7 @@ impl Render for TextTooltip {
             .px_2p5()
             .py_1()
             .rounded(px(8.))
-            .bg(pick(0x22222af5, 0xfffffffa))
+            .bg(rgba(0x22222af5))
             .border_1()
             .border_color(glass_border())
             .shadow(card_shadow(0.))
