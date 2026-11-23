@@ -168,8 +168,10 @@ type ClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 
 /// Height shared by the pill buttons and the round buttons beside them.
 pub const BUTTON_H: f32 = 48.;
-/// Apple TV style buttons: the focused (hovered) one is white, the rest translucent charcoal.
-const SMOKE: u32 = 0x26262ac2;
+/// Apple TV style buttons: the focused (hovered) one is white; the rest are smoked glass, a
+/// see-through black with a faint light rim.
+const SMOKE: u32 = 0x0000006b;
+const SMOKE_RIM: u32 = 0xffffff33;
 const WHITE: u32 = 0xf5f5f7ff;
 const INK: u32 = 0x0b0b0fff;
 /// Group on each button, so its icon can turn dark while the button is hovered.
@@ -188,9 +190,19 @@ pub fn primary_button(
 ) -> Stateful<Div> {
     button_base(id, icon_path, true, label.into(), Box::new(on_click))
         .bg(rgba(WHITE))
+        .border_color(rgba(WHITE))
         .text_color(rgba(INK))
-        .group_hover(BUTTON_ROW, |s| s.bg(rgba(SMOKE)).text_color(text()))
-        .hover(|s| s.bg(rgba(WHITE)).text_color(rgba(INK)))
+        .shadow(card_shadow(0.2))
+        .group_hover(BUTTON_ROW, |s| {
+            s.bg(rgba(SMOKE))
+                .border_color(rgba(SMOKE_RIM))
+                .text_color(text())
+        })
+        .hover(|s| {
+            s.bg(rgba(WHITE))
+                .border_color(rgba(WHITE))
+                .text_color(rgba(INK))
+        })
 }
 
 /// A secondary action: charcoal at rest, white while hovered.
@@ -202,8 +214,14 @@ pub fn glass_button(
 ) -> Stateful<Div> {
     button_base(id, icon_path, false, label.into(), Box::new(on_click))
         .bg(rgba(SMOKE))
+        .border_color(rgba(SMOKE_RIM))
         .text_color(text())
-        .hover(|s| s.bg(rgba(WHITE)).text_color(rgba(INK)))
+        .hover(|s| {
+            s.bg(rgba(WHITE))
+                .border_color(rgba(WHITE))
+                .text_color(rgba(INK))
+                .shadow(card_shadow(0.2))
+        })
 }
 
 /// An icon that follows its button's colours. SVGs don't inherit text colour, so the light
@@ -256,6 +274,7 @@ fn button_base(
         .items_center()
         .gap(px(10.))
         .h(px(BUTTON_H))
+        .border_1()
         .pl(px(if icon_path.is_some() { 24. } else { 30. }))
         .pr(px(30.))
         .rounded_full()
@@ -298,13 +317,20 @@ pub fn round_button_styled(
         .items_center()
         .justify_center()
         .cursor_pointer()
+        .border_1()
         .when(selected, |d| {
             d.bg(rgba(WHITE))
+                .border_color(rgba(WHITE))
                 .child(icon(icon_path, icon_size, rgba(INK)))
         })
         .when(!selected, |d| {
             d.bg(rgba(SMOKE))
-                .hover(|s| s.bg(rgba(WHITE)))
+                .border_color(rgba(SMOKE_RIM))
+                .hover(|s| {
+                    s.bg(rgba(WHITE))
+                        .border_color(rgba(WHITE))
+                        .shadow(card_shadow(0.2))
+                })
                 .child(button_icon(icon_path, icon_size, false))
         })
         .on_click(on_click)

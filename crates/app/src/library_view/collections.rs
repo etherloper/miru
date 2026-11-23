@@ -316,7 +316,7 @@ impl LibraryView {
             let ids = menu.file_ids.clone();
             entries.push(MenuEntry::new(
                 "Remove from watch history",
-                "icons/restart.svg",
+                "icons/trash.svg",
                 move |this, _, cx| {
                     for id in &ids {
                         if let Err(e) = this.db.remove_from_history(*id) {
