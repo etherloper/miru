@@ -150,6 +150,7 @@ impl PlayerView {
             self.audio_output = self.session.player.audio_output_layout();
             self.menu = Some(MenuPage::Main);
             self.menu_cursor = 0;
+            self.menu_open_epoch += 1;
         }
         self.poke(cx);
     }
@@ -168,6 +169,8 @@ impl PlayerView {
             MenuPage::Main => 0,
         };
         self.menu = Some(page);
+        self.menu_forward = true;
+        self.menu_page_epoch += 1;
         self.poke(cx);
     }
 
@@ -179,6 +182,8 @@ impl PlayerView {
             _ => None,
         };
         self.menu = Some(MenuPage::Main);
+        self.menu_forward = false;
+        self.menu_page_epoch += 1;
         self.menu_cursor = from
             .and_then(|row| self.main_rows().iter().position(|r| *r == row))
             .unwrap_or(0);
@@ -261,6 +266,14 @@ impl PlayerView {
             MenuPage::Section(section) => self.render_section_page(section, max_list, cx),
             MenuPage::Info => self.render_info_page(cx),
         };
+        // A page change slides the new page in (from the right going in, the left coming
+        // back) as it fades up.
+        let shift = if self.menu_forward { 28. } else { -28. };
+        let body = div().child(body).with_animation(
+            ("menu-page", self.menu_page_epoch),
+            Animation::new(theme::motion(240)).with_easing(gpui::ease_out_quint()),
+            move |el, t| el.opacity(t).ml(px(shift * (1. - t))),
+        );
         div()
             .id("player-menu")
             // Above the click-outside layer: without this, pressing a row also reached that
@@ -281,6 +294,12 @@ impl PlayerView {
             .shadow(theme::card_shadow(1.))
             .text_color(theme::text())
             .child(body)
+            // Opening: rises a little and fades in.
+            .with_animation(
+                ("menu-open", self.menu_open_epoch),
+                Animation::new(theme::motion(200)).with_easing(gpui::ease_out_quint()),
+                |el, t| el.opacity(t).bottom(px(138. + 12. * t)),
+            )
     }
 
     fn menu_row(id: (&'static str, usize), highlighted: bool) -> gpui::Stateful<gpui::Div> {

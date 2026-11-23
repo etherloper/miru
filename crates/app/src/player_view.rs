@@ -116,6 +116,11 @@ pub struct PlayerView {
     menu_cursor: usize,
     /// Read when the Media info page opens.
     media_info: Option<miru_player::MediaInfo>,
+    /// Bumped when the menu opens and when its page changes, to replay those transitions;
+    /// `menu_forward` says which way the new page slides in.
+    menu_open_epoch: usize,
+    menu_page_epoch: usize,
+    menu_forward: bool,
     tracks: Vec<Track>,
     /// Channel layout mpv is sending to the audio device, shown in the Audio menu.
     audio_output: Option<String>,
@@ -224,6 +229,9 @@ impl PlayerView {
             menu: None,
             menu_cursor: 0,
             media_info: None,
+            menu_open_epoch: 0,
+            menu_page_epoch: 0,
+            menu_forward: true,
             tracks: Vec::new(),
             audio_output: None,
             seek_bounds: Rc::default(),
@@ -1341,7 +1349,7 @@ impl PlayerView {
                     // Audio, subtitles and chapters, in one menu.
                     .child(glass_round_button(
                         "player-menu",
-                        "icons/captions.svg",
+                        "icons/settings.svg",
                         44.,
                         self.menu.is_some(),
                         cx.listener(|this, _, _, cx| this.toggle_menu(cx)),
