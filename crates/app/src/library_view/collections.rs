@@ -258,19 +258,13 @@ impl LibraryView {
         };
         let id = menu.id;
         let panel: AnyElement = if menu.confirming {
-            div()
-                .id("collection-delete-confirm-panel")
+            theme::menu_surface(div().id("collection-delete-confirm-panel"))
                 .occlude()
                 .w(px(280.))
                 .p_4()
                 .flex()
                 .flex_col()
                 .gap_3()
-                .rounded(px(14.))
-                .bg(theme::panel())
-                .border_1()
-                .border_color(theme::glass_border())
-                .shadow(theme::frost_shadow())
                 .child(
                     div()
                         .text_sm()
@@ -843,9 +837,8 @@ impl LibraryView {
                 .items_center()
                 .gap_4()
                 .rounded(px(12.))
-                .bg(rgba(0xffffff0a))
                 .border_1()
-                .border_color(theme::glass_border())
+                .border_color(rgba(0xffffff33))
                 .child(div().flex_1().text_sm().child(format!(
                     "Delete “{}”? The titles stay in your library.",
                     collection.name

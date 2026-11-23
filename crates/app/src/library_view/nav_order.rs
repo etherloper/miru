@@ -166,10 +166,10 @@ impl LibraryView {
                 .border_color(theme::glass_border())
                 .cursor_grab()
                 .when(lifted, |d| {
-                    d.bg(rgba(0x1c1c22f2))
+                    d.bg(rgba(0x000000eb))
                         .rounded(px(10.))
                         .border_1()
-                        .border_color(rgba(0xffffff26))
+                        .border_color(rgba(0xffffff33))
                         .shadow(theme::card_shadow(1.))
                 })
                 .child(icon(icon_path, 18., theme::text_secondary()))

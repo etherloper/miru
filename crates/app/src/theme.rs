@@ -73,11 +73,6 @@ pub fn menu_open_animation() -> gpui::Animation {
     gpui::Animation::new(motion(180)).with_easing(gpui::ease_out_quint())
 }
 
-/// Menus, popovers and other raised surfaces.
-pub fn panel() -> Rgba {
-    rgba(0x1c1c22f2)
-}
-
 pub fn card_shadow(lift: f32) -> Vec<BoxShadow> {
     vec![BoxShadow {
         color: hsla(0., 0., 0., 0.35 + 0.25 * lift),
@@ -581,9 +576,9 @@ impl Render for TextTooltip {
             .px_2p5()
             .py_1()
             .rounded(px(8.))
-            .bg(rgba(0x22222af5))
+            .bg(rgba(0x000000eb))
             .border_1()
-            .border_color(glass_border())
+            .border_color(rgba(0xffffff33))
             .shadow(card_shadow(0.))
             .font_family(FONT)
             .text_xs()
