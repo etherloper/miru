@@ -18,7 +18,7 @@ pub(super) enum UpdateState {
         release: Release,
         progress: f32,
     },
-    /// Downloaded and verified; installing closes Miru and opens the installer.
+    /// Downloaded and verified; installing closes Miru, installs and starts it again.
     Ready {
         release: Release,
         installer: PathBuf,
@@ -506,7 +506,7 @@ impl LibraryView {
             ),
             UpdateState::Ready { release, .. } => (
                 format!("Version {} is ready", release.version),
-                "Miru will close and the installer will open.".into(),
+                "Miru will close, update and reopen.".into(),
                 Some(
                     primary_button(
                         "update-install",

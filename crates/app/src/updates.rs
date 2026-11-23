@@ -180,15 +180,17 @@ pub fn download(release: &Release, dir: &Path, progress: impl Fn(f32)) -> Result
     Ok(target)
 }
 
-/// Opens the installer as a normal, visible window; the caller quits straight after, so
-/// Miru is closed by the time the installer copies files, and the installer offers to start
-/// the new version when it finishes.
+/// Runs the installer in its passive mode (`/P`): a small progress window and no questions;
+/// it closes Miru if it is still running, installs, and with `/R` starts the new version. The
+/// caller quits straight after.
 ///
-/// Deliberately not silent and not through a script: an app that downloads a program and runs
-/// it invisibly is what malware does, and antivirus heuristics treat it that way.
+/// The installer is started directly and stays visible. 0.1.7, which started it hidden through
+/// PowerShell, was flagged by Defender: an app that downloads a program and runs it invisibly
+/// via a script is what malware does.
 #[cfg(windows)]
 pub fn open_installer(installer: &Path) -> Result<()> {
     std::process::Command::new(installer)
+        .args(["/P", "/R"])
         .spawn()
         .context("starting the installer")?;
     Ok(())
