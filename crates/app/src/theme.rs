@@ -44,6 +44,36 @@ pub fn glass_hover() -> Rgba {
 pub fn glass_border() -> Rgba {
     rgba(0xffffff1a)
 }
+/// Floating menus (the player's settings, ⋯ menus, dropdowns) share one look: black glass
+/// with a light rim, rows that light up on hover, and a short fade as they open.
+pub fn menu_surface<E: Styled>(el: E) -> E {
+    el.p_1p5()
+        .rounded(px(12.))
+        .bg(rgba(0x000000eb))
+        .border_1()
+        .border_color(rgba(0xffffff33))
+        .shadow(card_shadow(1.))
+}
+
+/// Height of a menu row.
+pub const MENU_ROW_H: f32 = 38.;
+
+/// A menu row's hover (and keyboard highlight) fill.
+pub fn menu_hover() -> Rgba {
+    rgba(0xffffff1a)
+}
+
+/// Hairline between groups of menu rows.
+pub fn menu_divider() -> Rgba {
+    rgba(0xffffff1f)
+}
+
+/// How a menu opens: a quick fade with a small drop into place.
+pub fn menu_open_animation() -> gpui::Animation {
+    gpui::Animation::new(motion(180)).with_easing(gpui::ease_out_quint())
+}
+
+/// Menus, popovers and other raised surfaces.
 pub fn panel() -> Rgba {
     rgba(0x1c1c22f2)
 }

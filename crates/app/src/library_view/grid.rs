@@ -418,7 +418,7 @@ impl LibraryView {
                 let action = option.action.clone();
                 div()
                     .id(("grid-option", ix))
-                    .h(px(36.))
+                    .h(px(theme::MENU_ROW_H))
                     .px_3()
                     .flex()
                     .flex_shrink_0()
@@ -432,12 +432,12 @@ impl LibraryView {
                     } else {
                         theme::text_secondary()
                     })
-                    .hover(|s| s.bg(rgba(0xffffff14)).text_color(theme::text()))
+                    .hover(|s| s.bg(theme::menu_hover()).text_color(theme::text()))
                     .child(
-                        div().w(px(14.)).flex().children(
+                        div().w(px(16.)).flex().children(
                             option
                                 .selected
-                                .then(|| icon("icons/check.svg", 14., theme::accent())),
+                                .then(|| icon("icons/check.svg", 15., theme::text())),
                         ),
                     )
                     .child(div().flex_1().child(option.label))
@@ -449,26 +449,22 @@ impl LibraryView {
                     }))
                     .on_click(cx.listener(move |this, _, _, cx| action(this, cx)))
             });
-            let list = div()
-                .id("grid-menu")
+            let list = theme::menu_surface(div().id("grid-menu"))
                 .occlude()
                 .mt_2()
                 .w(px(width))
                 .max_h(px(420.))
                 .overflow_y_scroll()
-                .p_1p5()
                 .flex()
                 .flex_col()
-                .rounded(px(14.))
-                .bg(theme::panel())
-                .border_1()
-                .border_color(theme::glass_border())
-                .shadow(theme::frost_shadow())
                 .children(rows)
                 .on_mouse_down_out(cx.listener(|this, _, _, cx| {
                     this.close_genre_menu();
                     cx.notify();
-                }));
+                }))
+                .with_animation("grid-menu-open", theme::menu_open_animation(), |el, t| {
+                    el.opacity(t).mt(px(8. - 6. * (1. - t)))
+                });
             div().absolute().top_full().right_0().child(
                 gpui::deferred(
                     gpui::anchored()

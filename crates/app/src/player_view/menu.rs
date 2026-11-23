@@ -63,7 +63,7 @@ struct Choice {
 }
 
 const MENU_W: f32 = 300.;
-const ROW_H: f32 = 40.;
+const ROW_H: f32 = theme::MENU_ROW_H;
 
 impl PlayerView {
     fn main_rows(&self) -> Vec<MainRow> {
@@ -274,8 +274,7 @@ impl PlayerView {
             Animation::new(theme::motion(240)).with_easing(gpui::ease_out_quint()),
             move |el, t| el.opacity(t).ml(px(shift * (1. - t))),
         );
-        div()
-            .id("player-menu")
+        theme::menu_surface(div().id("player-menu"))
             // Above the click-outside layer: without this, pressing a row also reached that
             // layer, which closed the menu before the click could land.
             .occlude()
@@ -283,15 +282,9 @@ impl PlayerView {
             .right(px(EDGE))
             .bottom(px(150.))
             .w(px(MENU_W))
-            .p_1p5()
             .flex()
             .flex_col()
-            .rounded(px(12.))
             .overflow_hidden()
-            .bg(rgba(0x000000eb))
-            .border_1()
-            .border_color(rgba(0xffffff33))
-            .shadow(theme::card_shadow(1.))
             .text_color(theme::text())
             .child(body)
             // Opening: rises a little and fades in.
@@ -314,8 +307,8 @@ impl PlayerView {
             .rounded(px(8.))
             .cursor_pointer()
             .text_sm()
-            .when(highlighted, |d| d.bg(rgba(0xffffff1a)))
-            .hover(|s| s.bg(rgba(0xffffff1a)))
+            .when(highlighted, |d| d.bg(theme::menu_hover()))
+            .hover(|s| s.bg(theme::menu_hover()))
     }
 
     fn render_main_page(&self, cx: &mut Context<Self>) -> AnyElement {

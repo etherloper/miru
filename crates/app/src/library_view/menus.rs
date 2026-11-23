@@ -1,7 +1,5 @@
 //! The "⋯" menus: on detail pages (Mark as watched, Fix match, collections) and on posters.
 
-use gpui::Stateful;
-
 use super::*;
 
 pub(super) type MenuAction = Rc<dyn Fn(&mut LibraryView, &mut Window, &mut Context<LibraryView>)>;
@@ -57,7 +55,7 @@ impl LibraryView {
         entries: Vec<MenuEntry>,
         close: fn(&mut LibraryView),
         cx: &mut Context<Self>,
-    ) -> Stateful<Div> {
+    ) -> AnyElement {
         self.menu_panel_sized(id, entries, 220., close, cx)
     }
 
@@ -69,42 +67,29 @@ impl LibraryView {
         min_width: f32,
         close: fn(&mut LibraryView),
         cx: &mut Context<Self>,
-    ) -> Stateful<Div> {
+    ) -> AnyElement {
         let rows = entries.into_iter().enumerate().map(|(ix, entry)| {
             let action = entry.action.clone();
             let danger = entry.danger;
+            let ink = if danger {
+                theme::danger()
+            } else {
+                theme::text()
+            };
             let row = div()
                 .id((id, ix))
-                .h(px(36.))
+                .h(px(theme::MENU_ROW_H))
+                .flex_shrink_0()
                 .px_3()
                 .flex()
                 .items_center()
                 .gap_3()
                 .rounded(px(8.))
                 .text_sm()
-                .text_color(if entry.danger {
-                    theme::danger()
-                } else {
-                    theme::text_secondary()
-                })
+                .text_color(ink)
                 .cursor_pointer()
-                .hover(move |s| {
-                    let s = s.bg(rgba(0xffffff14));
-                    if danger {
-                        s
-                    } else {
-                        s.text_color(theme::text())
-                    }
-                })
-                .child(icon(
-                    entry.icon,
-                    15.,
-                    if danger {
-                        theme::danger()
-                    } else {
-                        theme::text_secondary()
-                    },
-                ))
+                .hover(|s| s.bg(theme::menu_hover()))
+                .child(icon(entry.icon, 16., ink))
                 .child(div().min_w_0().truncate().child(entry.label))
                 .on_click(cx.listener(move |this, _, window, cx| {
                     close(this);
@@ -115,31 +100,28 @@ impl LibraryView {
                 div()
                     .flex()
                     .flex_col()
-                    .child(div().mx_2().my_1().h(px(1.)).bg(rgba(0xffffff12)))
+                    .child(div().mx_1().my_1().h(px(1.)).bg(theme::menu_divider()))
                     .child(row)
                     .into_any_element()
             } else {
                 row.into_any_element()
             }
         });
-        div()
-            .id(id)
+        theme::menu_surface(div().id(id))
             .occlude()
             .min_w(px(min_width))
             .max_w(px(320.))
-            .p_1p5()
             .flex()
             .flex_col()
-            .rounded(px(14.))
-            .bg(theme::panel())
-            .border_1()
-            .border_color(theme::glass_border())
-            .shadow(theme::frost_shadow())
             .children(rows)
             .on_mouse_down_out(cx.listener(move |this, _, _, cx| {
                 close(this);
                 cx.notify();
             }))
+            .with_animation(id, theme::menu_open_animation(), |el, t| {
+                el.opacity(t).mt(px(-6. * (1. - t)))
+            })
+            .into_any_element()
     }
 
     /// Round "⋯" button beside a detail page's play buttons, opening a small menu below it.
