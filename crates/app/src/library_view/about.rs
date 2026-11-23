@@ -402,7 +402,6 @@ impl LibraryView {
             .gap_4()
             .px_5()
             .py_4()
-            .bg(rgba(0xffffff05))
             .border_b_1()
             .border_color(theme::glass_border())
             .child(

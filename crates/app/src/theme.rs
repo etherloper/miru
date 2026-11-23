@@ -320,6 +320,23 @@ pub fn icon_button(
     enabled: bool,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> Stateful<Div> {
+    tinted_icon_button(id, icon_path, size, enabled, text(), on_click)
+}
+
+/// Destructive actions (delete, remove) turn red when hovered.
+pub fn danger() -> Rgba {
+    rgb(0xff5c5c)
+}
+
+/// An icon button whose icon takes `hover` colour while hovered (e.g. red for a bin).
+pub fn tinted_icon_button(
+    id: impl Into<gpui::ElementId>,
+    icon_path: &'static str,
+    size: f32,
+    enabled: bool,
+    hover: Rgba,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> Stateful<Div> {
     let glyph = svg()
         .path(icon_path)
         .size(px(size * 0.5))
@@ -331,7 +348,7 @@ pub fn icon_button(
         })
         // Hovering brightens the icon; there is no background.
         .when(enabled, |s| {
-            s.group_hover(ICON_BUTTON_GROUP, |s| s.text_color(text()))
+            s.group_hover(ICON_BUTTON_GROUP, move |s| s.text_color(hover))
         });
     div()
         .id(id)

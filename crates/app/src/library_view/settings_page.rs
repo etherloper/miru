@@ -558,11 +558,12 @@ impl LibraryView {
                             ),
                     )
                     .child(
-                        theme::icon_button(
+                        theme::tinted_icon_button(
                             ("history-remove", ix),
                             "icons/trash.svg",
                             34.,
                             true,
+                            theme::danger(),
                             cx.listener(move |this, _, _, cx| {
                                 cx.stop_propagation();
                                 this.remove_titles_from_history(&ids, cx);
@@ -807,9 +808,10 @@ pub(super) fn section(
             div()
                 .rounded(px(16.))
                 .overflow_hidden()
-                .bg(rgba(0xffffff0a))
+                // Outlined on the black page rather than filled grey: on OLED panels a
+                // near-black fill looks blotchy, while black with a hairline stays clean.
                 .border_1()
-                .border_color(theme::glass_border())
+                .border_color(rgba(0xffffff24))
                 .flex()
                 .flex_col()
                 .children(rows),
