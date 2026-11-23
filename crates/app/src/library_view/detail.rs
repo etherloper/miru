@@ -421,13 +421,18 @@ impl LibraryView {
                                 .flex()
                                 .items_center()
                                 .gap_1p5()
+                                // IMDb's yellow logo plate.
                                 .child(
                                     div()
-                                        .px_1()
+                                        .h(px(16.))
+                                        .px(px(5.))
+                                        .flex()
+                                        .items_center()
                                         .rounded(px(3.))
                                         .bg(gpui::rgb(0xf5c518))
                                         .text_color(gpui::rgb(0x000000))
-                                        .font_weight(FontWeight::BOLD)
+                                        .text_size(px(11.))
+                                        .font_weight(FontWeight::BLACK)
                                         .child("IMDb"),
                                 )
                                 .child(format!("{:.1}", f32::from(imdb) / 10.))
@@ -445,11 +450,15 @@ impl LibraryView {
                                 .flex()
                                 .items_center()
                                 .gap_1p5()
-                                .child(div().size(px(9.)).rounded_full().bg(if fresh {
-                                    gpui::rgb(0xfa320a)
-                                } else {
-                                    gpui::rgb(0x0ac855)
-                                }))
+                                // The fresh tomato or the rotten splat.
+                                .child(
+                                    gpui::img(if fresh {
+                                        "brand/rt-fresh.svg"
+                                    } else {
+                                        "brand/rt-rotten.svg"
+                                    })
+                                    .size(px(16.)),
+                                )
                                 .child(format!("{rt}%"))
                                 .into_any_element(),
                         )
@@ -469,16 +478,22 @@ impl LibraryView {
                                 .flex()
                                 .items_center()
                                 .gap_1p5()
+                                // Metacritic's mark, then its coloured score box.
+                                .child(gpui::img("brand/metacritic.svg").size(px(16.)))
                                 .child(
                                     div()
-                                        .px_1()
+                                        .h(px(16.))
+                                        .min_w(px(20.))
+                                        .px(px(3.))
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
                                         .rounded(px(3.))
                                         .bg(gpui::rgb(colour))
                                         .text_color(gpui::rgb(0x000000))
                                         .font_weight(FontWeight::BOLD)
                                         .child(mc.to_string()),
                                 )
-                                .child("Metacritic")
                                 .into_any_element(),
                         )
                         .into_any_element(),
