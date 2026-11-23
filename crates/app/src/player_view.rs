@@ -17,7 +17,7 @@ use crate::theme::{self, glass_round_button, icon};
 use crate::video_host::VideoHost;
 
 mod menu;
-use menu::MenuSection;
+use menu::MenuPage;
 
 const CONTROLS_IDLE_TIMEOUT: Duration = Duration::from_millis(1800);
 /// Long enough to read as a gentle fade rather than a cut.
@@ -110,11 +110,12 @@ pub struct PlayerView {
     focus: FocusHandle,
     last_activity: Instant,
     last_saved: Instant,
-    /// The tracks-and-chapters menu, open at this section.
-    menu: Option<MenuSection>,
-    /// The keyboard highlight in the open section, and the section it last showed.
+    /// The settings menu (audio, subtitles, chapters, media info), open at this page.
+    menu: Option<MenuPage>,
+    /// The keyboard highlight on the open page.
     menu_cursor: usize,
-    menu_last: MenuSection,
+    /// Read when the Media info page opens.
+    media_info: Option<miru_player::MediaInfo>,
     tracks: Vec<Track>,
     /// Channel layout mpv is sending to the audio device, shown in the Audio menu.
     audio_output: Option<String>,
@@ -222,7 +223,7 @@ impl PlayerView {
             last_saved: Instant::now(),
             menu: None,
             menu_cursor: 0,
-            menu_last: MenuSection::Audio,
+            media_info: None,
             tracks: Vec::new(),
             audio_output: None,
             seek_bounds: Rc::default(),
@@ -1467,8 +1468,8 @@ impl Render for PlayerView {
                         ),
                 );
             }
-            if let Some(section) = self.menu {
-                overlay = overlay.child(self.render_player_menu(section, window, cx));
+            if let Some(page) = self.menu {
+                overlay = overlay.child(self.render_player_menu(page, window, cx));
             }
             let animation =
                 Animation::new(theme::motion(self.controls_fade_ms)).with_easing(ease_in_out);

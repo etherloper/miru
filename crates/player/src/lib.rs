@@ -353,6 +353,34 @@ impl Player {
         Ok(self.mpv.set_property("chapter", index as i64)?)
     }
 
+    /// Technical details of the playing file, for the player's Media info page.
+    pub fn media_info(&self) -> MediaInfo {
+        let text = |name: &str| {
+            self.mpv
+                .get_property::<String>(name)
+                .ok()
+                .filter(|s| !s.is_empty())
+        };
+        let int = |name: &str| self.mpv.get_property::<i64>(name).ok().filter(|v| *v > 0);
+        let float = |name: &str| self.mpv.get_property::<f64>(name).ok().filter(|v| *v > 0.);
+        MediaInfo {
+            path: text("path"),
+            container: text("file-format"),
+            size_bytes: int("file-size"),
+            video_codec: text("video-format"),
+            width: int("video-params/w"),
+            height: int("video-params/h"),
+            fps: float("container-fps").or_else(|| float("estimated-vf-fps")),
+            gamma: text("video-params/gamma"),
+            video_bitrate: float("video-bitrate"),
+            audio_codec: text("audio-codec-name"),
+            audio_channels: text("audio-params/hr-channels"),
+            sample_rate: int("audio-params/samplerate"),
+            audio_bitrate: float("audio-bitrate"),
+            hwdec: text("hwdec-current").filter(|h| h != "no"),
+        }
+    }
+
     /// The channel layout actually sent to the audio device, e.g. "stereo" or "5.1".
     pub fn audio_output_layout(&self) -> Option<String> {
         self.mpv
@@ -420,6 +448,32 @@ impl Player {
             video_ready: self.mpv.get_property("vo-configured").unwrap_or(false),
         }
     }
+}
+
+/// What mpv reports about the playing file. Any field may be missing (bitrates are estimates
+/// that appear after a few seconds of playback).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct MediaInfo {
+    pub path: Option<String>,
+    /// mpv's demuxer name, e.g. "mkv" or "mp4".
+    pub container: Option<String>,
+    pub size_bytes: Option<i64>,
+    /// Short codec name, e.g. "hevc" or "h264".
+    pub video_codec: Option<String>,
+    pub width: Option<i64>,
+    pub height: Option<i64>,
+    pub fps: Option<f64>,
+    /// Transfer function: "pq" (HDR10/Dolby Vision), "hlg", or an SDR curve.
+    pub gamma: Option<String>,
+    /// Bits per second.
+    pub video_bitrate: Option<f64>,
+    pub audio_codec: Option<String>,
+    /// e.g. "5.1" or "stereo".
+    pub audio_channels: Option<String>,
+    pub sample_rate: Option<i64>,
+    pub audio_bitrate: Option<f64>,
+    /// The hardware decoder in use, if any (e.g. "d3d11va").
+    pub hwdec: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
