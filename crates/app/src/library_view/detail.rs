@@ -407,6 +407,17 @@ impl LibraryView {
             .map(|c| chip(div().child(c).into_any_element()));
         // IMDb, Rotten Tomatoes and Metacritic when OMDb has them (an OMDb key is set);
         // otherwise TMDB's audience score.
+        // Rating badges sit bare beside the outlined age-rating chip.
+        let badge = |content: AnyElement| {
+            div()
+                .flex()
+                .items_center()
+                .h(px(22.))
+                .text_xs()
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(theme::text())
+                .child(content)
+        };
         let outside = self
             .ratings
             .get(&item.key)
@@ -416,7 +427,7 @@ impl LibraryView {
                 let mut chips = Vec::new();
                 if let Some(imdb) = r.imdb_tenths {
                     chips.push(
-                        chip(
+                        badge(
                             div()
                                 .flex()
                                 .items_center()
@@ -445,20 +456,17 @@ impl LibraryView {
                     // Red for "fresh" (60% and up), green for "rotten", as on the site.
                     let fresh = rt >= 60;
                     chips.push(
-                        chip(
+                        badge(
                             div()
                                 .flex()
                                 .items_center()
                                 .gap_1p5()
                                 // The fresh tomato or the rotten splat.
-                                .child(
-                                    gpui::img(if fresh {
-                                        "brand/rt-fresh.svg"
-                                    } else {
-                                        "brand/rt-rotten.svg"
-                                    })
-                                    .size(px(16.)),
-                                )
+                                .child(brand_image(if fresh {
+                                    "brand/rt-fresh.svg"
+                                } else {
+                                    "brand/rt-rotten.svg"
+                                }))
                                 .child(format!("{rt}%"))
                                 .into_any_element(),
                         )
@@ -473,13 +481,13 @@ impl LibraryView {
                         _ => 0xff0000,
                     };
                     chips.push(
-                        chip(
+                        badge(
                             div()
                                 .flex()
                                 .items_center()
                                 .gap_1p5()
                                 // Metacritic's mark, then its coloured score box.
-                                .child(gpui::img("brand/metacritic.svg").size(px(16.)))
+                                .child(brand_image("brand/metacritic.svg"))
                                 .child(
                                     div()
                                         .h(px(16.))
@@ -504,7 +512,7 @@ impl LibraryView {
             None => meta
                 .rating_tenths
                 .map(|r| {
-                    chip(
+                    badge(
                         div()
                             .flex()
                             .items_center()
@@ -768,4 +776,13 @@ pub(super) fn hero_art(item: &LibraryItem) -> AnyElement {
             .bg(theme::placeholder(&item.key.title, meta.accent_rgb))
             .into_any_element(),
     }
+}
+
+/// A review site's mark, drawn in its own colours. Built-in images go through GPUI's own
+/// image cache: the library's cache only loads artwork files from disk.
+fn brand_image(path: &'static str) -> impl IntoElement {
+    div()
+        .flex_shrink_0()
+        .image_cache(gpui::retain_all(path))
+        .child(gpui::img(path).size(px(16.)))
 }
