@@ -241,11 +241,8 @@ impl LibraryView {
     pub(super) fn sort_control(&self, tab: Tab, cx: &mut Context<Self>) -> AnyElement {
         let (current, options): (LibrarySort, Vec<LibrarySort>) = match tab {
             Tab::Movies => (self.settings.movie_sort, LibrarySort::ALL.to_vec()),
-            // Shows are grouped by name only, so they have no year to sort by.
-            Tab::Shows => (
-                self.settings.show_sort,
-                vec![LibrarySort::Title, LibrarySort::RecentlyAdded],
-            ),
+            // Shows sort by year too, using the first-aired year from TMDB.
+            Tab::Shows => (self.settings.show_sort, LibrarySort::ALL.to_vec()),
             Tab::Home | Tab::Search => return theme::nothing(),
         };
         let rows = options
@@ -429,18 +426,24 @@ pub(super) fn sort_items(items: &mut [LibraryItem], sort: LibrarySort) {
         LibrarySort::RecentlyAdded => items.sort_by_key(|i| std::cmp::Reverse(i.added_at)),
         // Undated titles go last in both year orders.
         LibrarySort::Newest => items.sort_by_cached_key(|i| {
+            let year = item_year(i);
             (
-                i.key.year.is_none(),
-                std::cmp::Reverse(i.key.year),
+                year.is_none(),
+                std::cmp::Reverse(year),
                 title_sort_key(i.display_title()),
             )
         }),
         LibrarySort::Oldest => items.sort_by_cached_key(|i| {
-            (
-                i.key.year.is_none(),
-                i.key.year,
-                title_sort_key(i.display_title()),
-            )
+            let year = item_year(i);
+            (year.is_none(), year, title_sort_key(i.display_title()))
         }),
     }
+}
+
+/// A title's year: a movie's from its file name, else the release (or first-aired) year from
+/// TMDB. Shows are grouped by name only, so theirs always comes from TMDB.
+fn item_year(item: &LibraryItem) -> Option<u16> {
+    item.key
+        .year
+        .or_else(|| item.metadata.as_ref().and_then(|m| m.release_year))
 }
