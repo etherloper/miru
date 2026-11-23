@@ -174,14 +174,14 @@ impl LibraryView {
             .gap_3()
             .px_5()
             .py_4()
-            .child(primary_button(
+            .child(theme::compact_button(
                 "settings-add-folder",
                 Some("icons/plus.svg"),
                 "Add Folder",
                 cx.listener(Self::add_folders),
             ))
             .child(
-                glass_button(
+                theme::compact_button(
                     "settings-rescan",
                     Some("icons/restart.svg"),
                     if busy { "Scanning…" } else { "Scan Now" },
@@ -990,6 +990,8 @@ pub(super) fn small_button(
         .flex()
         .flex_shrink_0()
         .items_center()
+        .justify_center()
+        .whitespace_nowrap()
         .rounded_full()
         .text_sm()
         .font_weight(FontWeight::MEDIUM)

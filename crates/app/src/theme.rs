@@ -231,12 +231,45 @@ fn button_icon(path: &'static str, size: f32) -> Div {
         )
 }
 
+/// A smaller button for Settings rows and toolbars: same look, about two-thirds the size.
+pub fn compact_button(
+    id: &'static str,
+    icon_path: Option<&'static str>,
+    label: impl Into<gpui::SharedString>,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> Stateful<Div> {
+    sized_button(id, icon_path, label.into(), Box::new(on_click), true)
+        .bg(rgba(SMOKE))
+        .border_color(rgba(SMOKE_RIM))
+        .text_color(text())
+        .hover(|s| {
+            s.bg(rgba(WHITE))
+                .border_color(rgba(WHITE))
+                .text_color(rgba(INK))
+        })
+}
+
 fn button_base(
     id: &'static str,
     icon_path: Option<&'static str>,
     label: gpui::SharedString,
     on_click: ClickHandler,
 ) -> Stateful<Div> {
+    sized_button(id, icon_path, label, on_click, false)
+}
+
+fn sized_button(
+    id: &'static str,
+    icon_path: Option<&'static str>,
+    label: gpui::SharedString,
+    on_click: ClickHandler,
+    compact: bool,
+) -> Stateful<Div> {
+    let (height, pad, gap, text_size, icon_size) = if compact {
+        (34., 16., 7., 14., 15.)
+    } else {
+        (BUTTON_H, 30., 10., 16., 18.)
+    };
     div()
         .id(id)
         .group(BUTTON_GROUP)
@@ -245,16 +278,18 @@ fn button_base(
         .flex()
         .flex_shrink_0()
         .items_center()
-        .gap(px(10.))
-        .h(px(BUTTON_H))
+        .justify_center()
+        .gap(px(gap))
+        .h(px(height))
         .border_1()
-        .pl(px(if icon_path.is_some() { 24. } else { 30. }))
-        .pr(px(30.))
+        .pl(px(if icon_path.is_some() { pad - 4. } else { pad }))
+        .pr(px(pad))
         .rounded_full()
-        .text_size(px(16.))
+        .text_size(px(text_size))
         .font_weight(FontWeight::MEDIUM)
+        .whitespace_nowrap()
         .cursor_pointer()
-        .children(icon_path.map(|p| button_icon(p, 18.)))
+        .children(icon_path.map(|p| button_icon(p, icon_size)))
         .child(label)
         .on_click(on_click)
 }
