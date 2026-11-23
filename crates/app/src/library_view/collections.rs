@@ -248,7 +248,7 @@ impl LibraryView {
         }
     }
 
-    /// The sidebar collection menu: Open, Rename and Delete, with Delete asking first.
+    /// The sidebar collection menu: Rename and Delete, with Delete asking first.
     pub(super) fn render_collection_menu(&self, cx: &mut Context<Self>) -> AnyElement {
         let Some(menu) = &self.collection_menu else {
             return theme::nothing();
@@ -314,32 +314,26 @@ impl LibraryView {
                 .into_any_element()
         } else {
             let entries = vec![
-                MenuEntry::new("Open", "icons/collection.svg", move |this, _, cx| {
-                    this.open_collection(id, cx)
-                }),
                 MenuEntry::new("Rename", "icons/pencil.svg", move |this, _, cx| {
                     this.start_rename(id, cx)
                 }),
-                MenuEntry::new(
-                    "Delete collection",
-                    "icons/trash.svg",
-                    move |this, _, cx| {
-                        // Reopen the menu as its confirmation, in the same place.
-                        if let Some(position) = this.last_collection_menu_at {
-                            this.collection_menu = Some(CollectionMenu {
-                                id,
-                                position,
-                                confirming: true,
-                            });
-                        }
-                        cx.notify();
-                    },
-                )
-                .divided(),
+                MenuEntry::new("Delete", "icons/trash.svg", move |this, _, cx| {
+                    // Reopen the menu as its confirmation, in the same place.
+                    if let Some(position) = this.last_collection_menu_at {
+                        this.collection_menu = Some(CollectionMenu {
+                            id,
+                            position,
+                            confirming: true,
+                        });
+                    }
+                    cx.notify();
+                })
+                .danger(),
             ];
-            self.menu_panel(
+            self.menu_panel_sized(
                 "collection-menu",
                 entries,
+                140.,
                 |this| this.close_collection_menu(),
                 cx,
             )

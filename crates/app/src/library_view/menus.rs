@@ -12,6 +12,8 @@ pub(super) struct MenuEntry {
     pub action: MenuAction,
     /// Starts a new group, with a hairline above it.
     pub divided: bool,
+    /// A destructive action, shown in red.
+    pub danger: bool,
 }
 
 impl MenuEntry {
@@ -25,7 +27,13 @@ impl MenuEntry {
             icon,
             action: Rc::new(action),
             divided: false,
+            danger: false,
         }
+    }
+
+    pub fn danger(mut self) -> Self {
+        self.danger = true;
+        self
     }
 
     pub fn divided(mut self) -> Self {
@@ -50,8 +58,21 @@ impl LibraryView {
         close: fn(&mut LibraryView),
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
+        self.menu_panel_sized(id, entries, 220., close, cx)
+    }
+
+    /// `menu_panel` at least `min_width` wide (it grows to fit its labels).
+    pub(super) fn menu_panel_sized(
+        &self,
+        id: &'static str,
+        entries: Vec<MenuEntry>,
+        min_width: f32,
+        close: fn(&mut LibraryView),
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
         let rows = entries.into_iter().enumerate().map(|(ix, entry)| {
             let action = entry.action.clone();
+            let danger = entry.danger;
             let row = div()
                 .id((id, ix))
                 .h(px(36.))
@@ -61,10 +82,29 @@ impl LibraryView {
                 .gap_3()
                 .rounded(px(8.))
                 .text_sm()
-                .text_color(theme::text_secondary())
+                .text_color(if entry.danger {
+                    theme::danger()
+                } else {
+                    theme::text_secondary()
+                })
                 .cursor_pointer()
-                .hover(|s| s.bg(rgba(0xffffff14)).text_color(theme::text()))
-                .child(icon(entry.icon, 15., theme::text_secondary()))
+                .hover(move |s| {
+                    let s = s.bg(rgba(0xffffff14));
+                    if danger {
+                        s
+                    } else {
+                        s.text_color(theme::text())
+                    }
+                })
+                .child(icon(
+                    entry.icon,
+                    15.,
+                    if danger {
+                        theme::danger()
+                    } else {
+                        theme::text_secondary()
+                    },
+                ))
                 .child(div().min_w_0().truncate().child(entry.label))
                 .on_click(cx.listener(move |this, _, window, cx| {
                     close(this);
@@ -85,7 +125,7 @@ impl LibraryView {
         div()
             .id(id)
             .occlude()
-            .min_w(px(220.))
+            .min_w(px(min_width))
             .max_w(px(320.))
             .p_1p5()
             .flex()
