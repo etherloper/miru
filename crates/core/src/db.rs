@@ -201,6 +201,21 @@ const MIGRATIONS: &[&str] = &[
         PRIMARY KEY (collection_id, kind, title, year)
     );
 ",
+    r"
+    -- IMDb, Rotten Tomatoes and Metacritic ratings from OMDb, cached per title.
+    CREATE TABLE title_ratings (
+        kind             TEXT NOT NULL,
+        title            TEXT NOT NULL COLLATE NOCASE,
+        year             INTEGER NOT NULL,
+        imdb_id          TEXT,
+        imdb_tenths      INTEGER,
+        imdb_votes       INTEGER,
+        rotten_tomatoes  INTEGER,
+        metacritic       INTEGER,
+        fetched_at       INTEGER NOT NULL,
+        PRIMARY KEY (kind, title, year)
+    );
+",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]

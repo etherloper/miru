@@ -14,8 +14,9 @@ use crate::library::{ItemKind, TitleKey};
 pub const BACKUP_FORMAT: u32 = 1;
 
 /// Settings that don't belong in a backup: secrets and per-install bookkeeping.
-const SKIPPED_SETTINGS: [&str; 3] = [
+const SKIPPED_SETTINGS: [&str; 4] = [
     "metadata.tmdb_key",
+    "metadata.omdb_key",
     "scan.parser_version",
     "updates.checked_at",
 ];

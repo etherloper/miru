@@ -6,6 +6,13 @@ use crate::updates::{self, Release, Version};
 use super::*;
 use crate::text_edit::{self, KeyOutcome, TextEdit};
 
+/// Which key the Metadata settings are editing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum KeyKind {
+    Tmdb,
+    Omdb,
+}
+
 /// Where an update stands.
 #[derive(Clone, PartialEq, Default)]
 pub(super) enum UpdateState {
@@ -63,27 +70,40 @@ impl LibraryView {
         cx.notify();
     }
 
-    fn start_key_edit(&mut self, cx: &mut Context<Self>) {
-        self.key_draft = Some(TextEdit::secret());
+    fn start_key_edit(&mut self, kind: KeyKind, cx: &mut Context<Self>) {
+        self.key_draft = Some((kind, TextEdit::secret()));
         self.key_focus_pending = true;
         cx.notify();
     }
 
     fn save_key(&mut self, cx: &mut Context<Self>) {
-        let Some(draft) = self.key_draft.take() else {
+        let Some((kind, draft)) = self.key_draft.take() else {
             return;
         };
         let key = draft.text().trim().to_string();
         if !key.is_empty() {
-            self.update_settings(|s| s.tmdb_key = Some(key), cx);
-            self.apply_tmdb_key(cx);
+            match kind {
+                KeyKind::Tmdb => {
+                    self.update_settings(|s| s.tmdb_key = Some(key), cx);
+                    self.apply_tmdb_key(cx);
+                }
+                KeyKind::Omdb => {
+                    self.update_settings(|s| s.omdb_key = Some(key), cx);
+                    self.refresh_open_ratings(cx);
+                }
+            }
         }
         cx.notify();
     }
 
-    fn remove_key(&mut self, cx: &mut Context<Self>) {
-        self.update_settings(|s| s.tmdb_key = None, cx);
-        self.apply_tmdb_key(cx);
+    fn remove_key(&mut self, kind: KeyKind, cx: &mut Context<Self>) {
+        match kind {
+            KeyKind::Tmdb => {
+                self.update_settings(|s| s.tmdb_key = None, cx);
+                self.apply_tmdb_key(cx);
+            }
+            KeyKind::Omdb => self.update_settings(|s| s.omdb_key = None, cx),
+        }
     }
 
     pub(super) fn on_key_field_key(
@@ -92,7 +112,7 @@ impl LibraryView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(draft) = &mut self.key_draft else {
+        let Some((_, draft)) = &mut self.key_draft else {
             return;
         };
         let k = &event.keystroke;
@@ -115,9 +135,10 @@ impl LibraryView {
         cx.notify();
     }
 
-    /// Rows for the Metadata section: where the TMDB key comes from, and setting your own.
+    /// Rows for the Metadata section: the TMDB key (where it comes from, or your own) and the
+    /// optional OMDb key for outside ratings.
     pub(super) fn metadata_rows(&self, window: &Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
-        let description = match self.tmdb_source {
+        let tmdb_description = match self.tmdb_source {
             Some(KeySource::Settings) => "Using the key you added.",
             Some(KeySource::Environment) => "Using the key from your .env file.",
             None => {
@@ -125,8 +146,37 @@ impl LibraryView {
                  from your folders only. Keys are free at themoviedb.org."
             }
         };
-        let control: AnyElement = match &self.key_draft {
-            Some(draft) => {
+        let omdb_description = if self.settings.omdb_key.is_some() {
+            "Showing IMDb, Rotten Tomatoes and Metacritic ratings on detail pages."
+        } else {
+            "Optional: add an OMDb key to show IMDb, Rotten Tomatoes and Metacritic ratings on \
+             detail pages. Keys are free at omdbapi.com."
+        };
+        vec![
+            setting_row(
+                "TMDB key",
+                Some(tmdb_description),
+                Some(self.key_control(KeyKind::Tmdb, window, cx)),
+            )
+            .into_any_element(),
+            setting_row(
+                "OMDb key",
+                Some(omdb_description),
+                Some(self.key_control(KeyKind::Omdb, window, cx)),
+            )
+            .into_any_element(),
+        ]
+    }
+
+    /// The edit field (while adding a key) or the Add/Change and Remove buttons.
+    fn key_control(&self, kind: KeyKind, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+        let has_key = match kind {
+            KeyKind::Tmdb => self.settings.tmdb_key.is_some(),
+            KeyKind::Omdb => self.settings.omdb_key.is_some(),
+        };
+        let editing = self.key_draft.as_ref().filter(|(k, _)| *k == kind);
+        match editing {
+            Some((_, draft)) => {
                 let focused = self.key_focus.is_focused(window);
                 div()
                     .flex()
@@ -134,7 +184,7 @@ impl LibraryView {
                     .gap_2()
                     .child(text_edit::mouse_handlers(
                         div()
-                            .id("tmdb-key-field")
+                            .id(("key-field", kind as usize))
                             .track_focus(&self.key_focus)
                             .on_key_down(cx.listener(Self::on_key_field_key))
                             .w(px(240.))
@@ -161,11 +211,11 @@ impl LibraryView {
                                 focused,
                             )),
                         &self.key_focus,
-                        |this: &mut Self| this.key_draft.as_mut(),
+                        |this: &mut Self| this.key_draft.as_mut().map(|(_, edit)| edit),
                         cx,
                     ))
                     .child(small_button(
-                        "tmdb-key-save",
+                        ("key-save", kind as usize),
                         "Save",
                         false,
                         cx.listener(|this, _, window, cx| {
@@ -174,7 +224,7 @@ impl LibraryView {
                         }),
                     ))
                     .child(small_button(
-                        "tmdb-key-cancel",
+                        ("key-cancel", kind as usize),
                         "Cancel",
                         false,
                         cx.listener(|this, _, _, cx| {
@@ -188,26 +238,21 @@ impl LibraryView {
                 .flex()
                 .gap_2()
                 .child(small_button(
-                    "tmdb-key-edit",
-                    if self.settings.tmdb_key.is_some() {
-                        "Change key"
-                    } else {
-                        "Add key"
-                    },
+                    ("key-edit", kind as usize),
+                    if has_key { "Change key" } else { "Add key" },
                     false,
-                    cx.listener(|this, _, _, cx| this.start_key_edit(cx)),
+                    cx.listener(move |this, _, _, cx| this.start_key_edit(kind, cx)),
                 ))
-                .when(self.settings.tmdb_key.is_some(), |d| {
+                .when(has_key, |d| {
                     d.child(small_button(
-                        "tmdb-key-remove",
+                        ("key-remove", kind as usize),
                         "Remove",
                         false,
-                        cx.listener(|this, _, _, cx| this.remove_key(cx)),
+                        cx.listener(move |this, _, _, cx| this.remove_key(kind, cx)),
                     ))
                 })
                 .into_any_element(),
-        };
-        vec![setting_row("TMDB key", Some(description), Some(control)).into_any_element()]
+        }
     }
 
     // ---- updates ------------------------------------------------------------------------

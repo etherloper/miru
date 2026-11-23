@@ -43,6 +43,7 @@ mod home;
 mod menus;
 mod nav_order;
 mod poster_drag;
+mod ratings;
 mod search;
 mod settings_page;
 mod sidebar;
@@ -341,6 +342,9 @@ pub struct LibraryView {
     /// Sidebar-order rows' eased offsets while reordering.
     nav_shift: Vec<f32>,
     nav_frame: Instant,
+    /// Outside ratings by title (see ratings.rs), and the titles being fetched.
+    ratings: HashMap<TitleKey, miru_core::ratings::TitleRatings>,
+    ratings_pending: std::collections::HashSet<TitleKey>,
     /// The outcome of the last backup or restore, shown under the Backup rows.
     backup_status: Option<(SharedString, bool)>,
     /// The collapsed-sidebar icon whose label is popped out (see `side_tip`).
@@ -354,7 +358,7 @@ pub struct LibraryView {
     /// Update check and install progress (Settings → About).
     update: about::UpdateState,
     /// TMDB key being typed in Settings, and its field's focus.
-    key_draft: Option<crate::text_edit::TextEdit>,
+    key_draft: Option<(about::KeyKind, crate::text_edit::TextEdit)>,
     key_focus: FocusHandle,
     key_focus_pending: bool,
     recent: Vec<LibraryItem>,
@@ -490,6 +494,8 @@ impl LibraryView {
             nav_drag: None,
             nav_shift: Vec::new(),
             nav_frame: Instant::now(),
+            ratings: HashMap::new(),
+            ratings_pending: std::collections::HashSet::new(),
             backup_status: None,
             side_tip_key: None,
             side_tip_epoch: 0,
@@ -1122,6 +1128,7 @@ impl LibraryView {
     }
 
     fn open(&mut self, item: &LibraryItem, cx: &mut Context<Self>) {
+        self.load_ratings(item, cx);
         let page = match item.key.kind {
             ItemKind::Movie => self.db.progress(item.file_id).map(|progress| Page::Movie {
                 item: item.clone(),

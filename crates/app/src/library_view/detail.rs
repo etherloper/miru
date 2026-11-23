@@ -405,17 +405,104 @@ impl LibraryView {
             .certification
             .clone()
             .map(|c| chip(div().child(c).into_any_element()));
-        let rating = meta.rating_tenths.map(|r| {
-            chip(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_1()
-                    .child(div().text_color(gpui::rgb(0xf5c518)).child("★"))
-                    .child(format!("{:.1}", f32::from(r) / 10.))
-                    .into_any_element(),
-            )
-        });
+        // IMDb, Rotten Tomatoes and Metacritic when OMDb has them (an OMDb key is set);
+        // otherwise TMDB's audience score.
+        let outside = self
+            .ratings
+            .get(&item.key)
+            .filter(|r| !r.is_empty() && self.settings.omdb_key.is_some());
+        let rating: Vec<AnyElement> = match outside {
+            Some(r) => {
+                let mut chips = Vec::new();
+                if let Some(imdb) = r.imdb_tenths {
+                    chips.push(
+                        chip(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_1p5()
+                                .child(
+                                    div()
+                                        .px_1()
+                                        .rounded(px(3.))
+                                        .bg(gpui::rgb(0xf5c518))
+                                        .text_color(gpui::rgb(0x000000))
+                                        .font_weight(FontWeight::BOLD)
+                                        .child("IMDb"),
+                                )
+                                .child(format!("{:.1}", f32::from(imdb) / 10.))
+                                .into_any_element(),
+                        )
+                        .into_any_element(),
+                    );
+                }
+                if let Some(rt) = r.rotten_tomatoes {
+                    // Red for "fresh" (60% and up), green for "rotten", as on the site.
+                    let fresh = rt >= 60;
+                    chips.push(
+                        chip(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_1p5()
+                                .child(div().size(px(9.)).rounded_full().bg(if fresh {
+                                    gpui::rgb(0xfa320a)
+                                } else {
+                                    gpui::rgb(0x0ac855)
+                                }))
+                                .child(format!("{rt}%"))
+                                .into_any_element(),
+                        )
+                        .into_any_element(),
+                    );
+                }
+                if let Some(mc) = r.metacritic {
+                    // Metacritic's colours: green from 61, yellow 40–60, red below.
+                    let colour = match mc {
+                        61.. => 0x66cc33,
+                        40..=60 => 0xffcc33,
+                        _ => 0xff0000,
+                    };
+                    chips.push(
+                        chip(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_1p5()
+                                .child(
+                                    div()
+                                        .px_1()
+                                        .rounded(px(3.))
+                                        .bg(gpui::rgb(colour))
+                                        .text_color(gpui::rgb(0x000000))
+                                        .font_weight(FontWeight::BOLD)
+                                        .child(mc.to_string()),
+                                )
+                                .child("Metacritic")
+                                .into_any_element(),
+                        )
+                        .into_any_element(),
+                    );
+                }
+                chips
+            }
+            None => meta
+                .rating_tenths
+                .map(|r| {
+                    chip(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_1()
+                            .child(div().text_color(gpui::rgb(0xf5c518)).child("★"))
+                            .child(format!("{:.1}", f32::from(r) / 10.))
+                            .into_any_element(),
+                    )
+                    .into_any_element()
+                })
+                .into_iter()
+                .collect(),
+        };
         // "Starring" with the first few names, then a link to the full cast sheet.
         let cast_item = item.clone();
         let starring = (!meta.cast.is_empty()).then(|| {

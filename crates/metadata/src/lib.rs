@@ -12,6 +12,9 @@ use miru_core::library::{CastMember, ItemKind, LibraryItem, Metadata, MetadataRe
 use miru_core::parse::ParsedMedia;
 use serde::Deserialize;
 
+mod omdb;
+pub use omdb::{Omdb, OmdbRatings};
+
 #[derive(Debug, thiserror::Error)]
 pub enum MetadataError {
     #[error("http: {0}")]
@@ -325,6 +328,23 @@ impl Tmdb {
             .query("append_to_response", format!("images,{credits},{ratings}"))
             .query("include_image_language", "en,null");
         Ok(self.authed(request).call()?.body_mut().read_json()?)
+    }
+
+    /// A title's IMDb id (e.g. "tt0113277"), for looking up its outside ratings.
+    pub fn imdb_id(&self, kind: ItemKind, id: i64) -> Result<Option<String>> {
+        #[derive(Deserialize)]
+        struct ExternalIds {
+            imdb_id: Option<String>,
+        }
+        let endpoint = match kind {
+            ItemKind::Movie => "movie",
+            ItemKind::Show => "tv",
+        };
+        let request = self
+            .agent
+            .get(format!("{API}/{endpoint}/{id}/external_ids"));
+        let ids: ExternalIds = self.authed(request).call()?.body_mut().read_json()?;
+        Ok(ids.imdb_id.filter(|i| i.starts_with("tt")))
     }
 
     /// Episodes of one season of a TV show. A season TMDB doesn't know returns an empty list.

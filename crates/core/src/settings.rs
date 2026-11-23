@@ -228,6 +228,8 @@ pub struct Settings {
     pub volume: u32,
     /// The user's own TMDB key, used instead of any built-in one.
     pub tmdb_key: Option<String>,
+    /// OMDb key, for IMDb, Rotten Tomatoes and Metacritic ratings.
+    pub omdb_key: Option<String>,
     /// Check for a newer version on launch (at most once a day).
     pub auto_update: bool,
     /// When updates were last checked (unix seconds; 0 = never).
@@ -252,6 +254,7 @@ impl Default for Settings {
             show_sort: LibrarySort::Title,
             volume: 100,
             tmdb_key: None,
+            omdb_key: None,
             auto_update: true,
             update_checked_at: 0,
         }
@@ -274,6 +277,7 @@ const MOVIE_SORT: &str = "library.movie_sort";
 const SHOW_SORT: &str = "library.show_sort";
 const VOLUME: &str = "playback.volume";
 const TMDB_KEY: &str = "metadata.tmdb_key";
+const OMDB_KEY: &str = "metadata.omdb_key";
 const AUTO_UPDATE: &str = "updates.auto";
 const UPDATE_CHECKED: &str = "updates.checked_at";
 
@@ -334,6 +338,10 @@ impl Db {
                 .setting(TMDB_KEY)?
                 .map(|v| v.trim().to_string())
                 .filter(|v| !v.is_empty()),
+            omdb_key: self
+                .setting(OMDB_KEY)?
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty()),
             auto_update: bool_of(self.setting(AUTO_UPDATE)?, defaults.auto_update),
             update_checked_at: self
                 .setting(UPDATE_CHECKED)?
@@ -366,6 +374,7 @@ impl Db {
             (SHOW_SORT, s.show_sort.as_str().to_string()),
             (VOLUME, s.volume.to_string()),
             (TMDB_KEY, s.tmdb_key.clone().unwrap_or_default()),
+            (OMDB_KEY, s.omdb_key.clone().unwrap_or_default()),
             (AUTO_UPDATE, s.auto_update.to_string()),
             (UPDATE_CHECKED, s.update_checked_at.to_string()),
         ];
@@ -468,6 +477,7 @@ mod tests {
             show_sort: LibrarySort::RecentlyAdded,
             volume: 40,
             tmdb_key: Some("abc".into()),
+            omdb_key: Some("def".into()),
             auto_update: false,
             update_checked_at: 1_700_000_000,
         };

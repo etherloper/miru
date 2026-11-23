@@ -5,6 +5,7 @@ pub mod episodes;
 pub mod library;
 pub mod parse;
 pub mod playback;
+pub mod ratings;
 pub mod scan;
 pub mod search;
 pub mod settings;
