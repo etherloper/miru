@@ -173,7 +173,7 @@ impl LibraryView {
             .items_center()
             .gap_3()
             .border_b_1()
-            .border_color(rgba(0xffffff0d))
+            .border_color(rgba(0xffffff1f))
             .when(pane.person.is_some(), |d| {
                 d.child(
                     round_button(
@@ -231,9 +231,10 @@ impl LibraryView {
             .w(px(SHEET_W))
             .flex()
             .flex_col()
-            .bg(rgba(0x16161cf7))
+            // True black with a light edge, like the other panels.
+            .bg(rgba(0x000000ff))
             .border_l_1()
-            .border_color(theme::glass_border())
+            .border_color(rgba(0xffffff2e))
             .shadow(theme::frost_shadow())
             .child(header)
             .child(body)
@@ -247,7 +248,7 @@ impl LibraryView {
             .id("cast-overlay")
             .absolute()
             .inset_0()
-            .bg(rgba(0x00000066))
+            .bg(rgba(0x00000099))
             .on_mouse_down(
                 gpui::MouseButton::Left,
                 cx.listener(|this, _, _, cx| this.close_cast(cx)),

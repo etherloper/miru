@@ -31,9 +31,8 @@ enum FixStatus {
 
 impl LibraryView {
     pub(super) fn open_fix_match(&mut self, item: LibraryItem, cx: &mut Context<Self>) {
-        // Prefilled and selected, so typing replaces it and the arrows edit it.
-        let mut query = TextEdit::new(item.display_title());
-        query.select_all();
+        // Prefilled, with the caret at the end.
+        let query = TextEdit::new(item.display_title());
         let kind = item.key.kind;
         self.fix_match = Some(FixMatch {
             item,
