@@ -724,118 +724,223 @@ fn unix_now() -> i64 {
 }
 
 impl LibraryView {
-    /// The sidebar's update button, which runs the whole update in place: "Update available"
-    /// starts the download, the button fills as it downloads, then "Restart to update" installs.
-    /// A failed download offers a retry. `None` when no update is waiting.
+    /// The sidebar's update control, which runs the whole update in place. Collapsed, it is a
+    /// round download button with a violet dot; expanded, a small card that also says what is
+    /// happening. Clicking downloads, a ring fills with the progress, then a restart icon
+    /// installs. A failed download offers a retry. `None` when no update is waiting.
     pub(super) fn update_button(
         &self,
         collapsed: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        const RADIUS: f32 = 8.;
-        let (label, icon_path, progress, action): (
-            String,
-            &'static str,
-            Option<f32>,
-            Option<UpdateAction>,
-        ) = match &self.update {
-            UpdateState::Available(_) => (
+        let (title, detail, action): (String, String, Option<UpdateAction>) = match &self.update {
+            UpdateState::Available(release) => (
                 "Update available".into(),
-                "icons/download.svg",
-                None,
+                format!("Version {} · click to download", release.version),
                 Some(UpdateAction::Download),
             ),
             UpdateState::Downloading { progress, .. } => (
-                format!("Downloading… {}%", (progress * 100.).round()),
-                "icons/download.svg",
-                Some(*progress),
+                "Downloading update".into(),
+                format!("{}%", (progress * 100.).round()),
                 None,
             ),
-            UpdateState::Ready { .. } => (
+            UpdateState::Ready { release, .. } => (
                 "Restart to update".into(),
-                "icons/restart.svg",
-                None,
+                format!("Version {} is ready", release.version),
                 Some(UpdateAction::Install),
             ),
             UpdateState::DownloadFailed { .. } => (
-                "Update failed · Retry".into(),
-                "icons/restart.svg",
-                None,
+                "Update failed".into(),
+                "Click to try again".into(),
                 Some(UpdateAction::Download),
             ),
             _ => return None,
         };
+        let progress = match &self.update {
+            UpdateState::Downloading { progress, .. } => Some(self.glide_fill(*progress, window)),
+            _ => None,
+        };
+        let ready = matches!(self.update, UpdateState::Ready { .. });
+        let failed = matches!(self.update, UpdateState::DownloadFailed { .. });
+        let badge = update_badge(if collapsed { 40. } else { 32. }, progress, ready, failed);
         let tooltip: SharedString = match &self.update {
             UpdateState::DownloadFailed { message, .. } => message.clone(),
-            _ => label.clone().into(),
+            _ => format!("{title} · {detail}").into(),
         };
-        // While downloading, a dimmed base with a white fill growing from the left; otherwise
-        // solid white. The fill rounds its own corners (children aren't clipped to rounding).
-        let progress = progress.map(|target| self.glide_fill(target, window));
-        let fill = progress.map(|p| {
+
+        let control = if collapsed {
             div()
-                .absolute()
-                .top_0()
-                .bottom_0()
-                .left_0()
-                .w(gpui::relative(p.clamp(0., 1.)))
-                .bg(theme::text())
-                .rounded_l(px(RADIUS))
-                .when(p > 0.97, |d| d.rounded_r(px(RADIUS)))
-        });
-        let button = div()
-            .id("nav-update")
-            .tab_index(0)
-            .focus_visible(theme::focus_ring)
-            .relative()
-            .mx_3()
-            .mb_1()
-            .h(px(NAV_ITEM_H))
-            .px_3()
-            .flex()
-            .items_center()
-            .when(collapsed, |d| d.justify_center())
-            .gap_3()
-            .rounded(px(RADIUS))
-            .text_sm()
-            .font_weight(FontWeight::SEMIBOLD)
-            .text_color(theme::bg())
-            .shadow(theme::card_shadow(0.))
-            .bg(if progress.is_some() {
-                rgba(0xffffff73)
-            } else {
-                theme::text()
-            })
-            .children(fill)
-            .child(
-                div()
-                    .relative()
-                    .flex()
-                    .child(icon(icon_path, 18., theme::bg())),
-            )
-            .when(!collapsed, |d| {
-                d.child(div().relative().truncate().child(label))
-            })
-            .when(collapsed, |d| {
-                d.tooltip(theme::text_tooltip_owned(tooltip.clone()))
-            })
-            .when(
-                !collapsed && matches!(self.update, UpdateState::DownloadFailed { .. }),
-                |d| d.tooltip(theme::text_tooltip_owned(tooltip.clone())),
-            );
-        let button = match action {
-            Some(action) => button
+                .id("nav-update")
+                .tab_index(0)
+                .focus_visible(theme::focus_ring)
+                .mb_2()
+                .flex()
+                .justify_center()
+                .child(badge)
+                .tooltip(theme::text_tooltip_owned(tooltip))
+        } else {
+            div()
+                .id("nav-update")
+                .tab_index(0)
+                .focus_visible(theme::focus_ring)
+                .mx_3()
+                .mb_2()
+                .p_2()
+                .pr_3()
+                .flex()
+                .items_center()
+                .gap_3()
+                .rounded(px(12.))
+                .bg(if ready {
+                    rgba(0xffffff1f)
+                } else {
+                    rgba(0xffffff0d)
+                })
+                .border_1()
+                .border_color(theme::glass_border())
+                .child(badge)
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .child(
+                            div()
+                                .text_sm()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .truncate()
+                                .child(title),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(theme::text_secondary())
+                                .truncate()
+                                .child(detail),
+                        ),
+                )
+                .when(failed, |d| d.tooltip(theme::text_tooltip_owned(tooltip)))
+        };
+        let control = match action {
+            Some(action) => control
                 .cursor_pointer()
-                .hover(|s| s.bg(rgba(0xffffffd9)))
+                .when(!collapsed, |d| d.hover(|s| s.bg(rgba(0xffffff26))))
                 .on_click(cx.listener(move |this, _, _, cx| match action {
                     UpdateAction::Download => this.download_update(cx),
                     UpdateAction::Install => this.install_update(cx),
                 })),
-            None => button,
+            None => control,
         };
-        Some(button.into_any_element())
+        Some(control.into_any_element())
     }
+}
+
+/// The round part of the update control: a download arrow with a violet dot; while
+/// downloading, a ring filling around it; when ready, a white disc with a restart arrow.
+fn update_badge(size: f32, progress: Option<f32>, ready: bool, failed: bool) -> impl IntoElement {
+    let group = "update-badge";
+    let (fill, ink, path) = if ready {
+        (theme::text(), theme::bg(), "icons/restart.svg")
+    } else if failed {
+        (rgba(0xffffff14), theme::text(), "icons/refresh.svg")
+    } else {
+        (rgba(0xffffff14), theme::text(), "icons/download.svg")
+    };
+    let dot = (progress.is_none() && !ready).then(|| {
+        div()
+            .absolute()
+            .top(px(-1.))
+            .right(px(-1.))
+            .size(px(10.))
+            .rounded_full()
+            .border_2()
+            .border_color(theme::bg())
+            .bg(if failed {
+                theme::danger()
+            } else {
+                theme::accent()
+            })
+    });
+    let ring = progress.map(|p| {
+        gpui::canvas(
+            |_, _, _| {},
+            move |bounds, _, window, _| {
+                let radius = f32::from(bounds.size.width) / 2. - 1.5;
+                let center = bounds.center();
+                if let Some(track) = arc(center, radius, 1.) {
+                    window.paint_path(track, rgba(0xffffff26));
+                }
+                if let Some(done) = arc(center, radius, p.clamp(0., 1.)) {
+                    window.paint_path(done, theme::text());
+                }
+            },
+        )
+        .absolute()
+        .inset_0()
+    });
+    div()
+        .group(group)
+        .relative()
+        .size(px(size))
+        .flex_shrink_0()
+        .rounded_full()
+        .flex()
+        .items_center()
+        .justify_center()
+        .bg(if progress.is_some() {
+            rgba(0x00000000)
+        } else {
+            fill
+        })
+        .when(progress.is_none(), |d| {
+            d.group_hover(group, |s| {
+                if ready {
+                    s.bg(rgba(0xffffffff))
+                } else {
+                    s.bg(rgba(0xffffff29))
+                }
+            })
+        })
+        .children(ring)
+        .child(icon(
+            path,
+            size * 0.45,
+            if progress.is_some() {
+                theme::text_secondary()
+            } else {
+                ink
+            },
+        ))
+        .children(dot)
+}
+
+/// A clockwise arc from the top of a circle, covering `fraction` of it, as a stroked path.
+fn arc(
+    center: gpui::Point<gpui::Pixels>,
+    radius: f32,
+    fraction: f32,
+) -> Option<gpui::Path<gpui::Pixels>> {
+    if fraction <= 0.001 {
+        return None;
+    }
+    let steps = ((fraction * 72.).ceil() as usize).max(2);
+    let mut path = gpui::PathBuilder::stroke(px(2.5));
+    for i in 0..=steps {
+        let angle = -std::f32::consts::FRAC_PI_2
+            + std::f32::consts::TAU * fraction * i as f32 / steps as f32;
+        let point = gpui::point(
+            center.x + px(radius * angle.cos()),
+            center.y + px(radius * angle.sin()),
+        );
+        if i == 0 {
+            path.move_to(point);
+        } else {
+            path.line_to(point);
+        }
+    }
+    path.build().ok()
 }
 
 impl LibraryView {

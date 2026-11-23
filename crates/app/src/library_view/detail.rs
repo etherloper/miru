@@ -515,7 +515,12 @@ impl LibraryView {
                     .relative()
                     .pt(px(NAV_HEIGHT + if is_show { 80. } else { 96. }))
                     .px(px(PAGE_PADDING))
-                    .pb(px(if is_show { 36. + EPISODES_OVERLAP } else { 56. }))
+                    // A movie page keeps room below its buttons for the ⋯ menu to open into.
+                    .pb(px(if is_show {
+                        36. + EPISODES_OVERLAP
+                    } else {
+                        150.
+                    }))
                     .max_w(px(780.))
                     .flex()
                     .flex_col()
