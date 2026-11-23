@@ -1,6 +1,7 @@
 //! Movies and TV Shows grids with their sort and genre controls.
 
 use super::*;
+use crate::genres::{Length, MIN_RATINGS};
 
 impl LibraryView {
     // ---- grids -----------------------------------------------------------------------------
@@ -33,6 +34,8 @@ impl LibraryView {
             .child(div().flex_1())
             .child(self.unwatched_toggle(tab, cx))
             .child(self.genre_dropdown(tab, cx))
+            .child(self.rating_dropdown(tab, cx))
+            .child(self.length_dropdown(tab, cx))
             .child(self.sort_control(tab, cx));
         let header = div()
             .flex_shrink_0()
@@ -55,10 +58,7 @@ impl LibraryView {
                         .justify_center()
                         .text_color(theme::text_secondary())
                         .child(
-                            if self
-                                .genre_filter(tab)
-                                .is_some_and(|f| f.selected.is_some() || f.unwatched_only)
-                            {
+                            if self.genre_filter(tab).is_some_and(GenreFilter::is_narrowed) {
                                 "Nothing matches these filters."
                             } else {
                                 "Nothing here yet."
@@ -237,6 +237,95 @@ impl LibraryView {
         self.grid_dropdown(tab, GridMenu::Genre, label, active, rows, 248., cx)
     }
 
+    fn filter_mut(&mut self, tab: Tab) -> Option<&mut GenreFilter> {
+        match tab {
+            Tab::Movies => Some(&mut self.movie_filter),
+            Tab::Shows => Some(&mut self.show_filter),
+            Tab::Home | Tab::Search => None,
+        }
+    }
+
+    /// Applies a change to a grid's filters and shows the grid from the top.
+    fn change_filter(
+        &mut self,
+        tab: Tab,
+        change: impl FnOnce(&mut GenreFilter),
+        cx: &mut Context<Self>,
+    ) {
+        let Some(filter) = self.filter_mut(tab) else {
+            return;
+        };
+        change(filter);
+        self.apply_filters();
+        self.close_genre_menu();
+        self.grid_scroll
+            .scroll_to_item(0, gpui::ScrollStrategy::Top);
+        cx.notify();
+    }
+
+    /// Minimum TMDB rating: Any, 6+, 7+ or 8+.
+    fn rating_dropdown(&self, tab: Tab, cx: &mut Context<Self>) -> AnyElement {
+        let Some(filter) = self.genre_filter(tab) else {
+            return theme::nothing();
+        };
+        let current = filter.min_rating;
+        let label = |min: Option<u16>| match min {
+            Some(min) => format!("Rated {}+", min / 10),
+            None => "Any rating".to_string(),
+        };
+        let rows = std::iter::once(None)
+            .chain(MIN_RATINGS.into_iter().map(Some))
+            .map(|min| GridOption {
+                label: label(min).into(),
+                count: None,
+                selected: min == current,
+                action: Rc::new(move |this: &mut Self, cx: &mut Context<Self>| {
+                    this.change_filter(tab, |f| f.min_rating = min, cx)
+                }),
+            })
+            .collect();
+        self.grid_dropdown(
+            tab,
+            GridMenu::Rating,
+            label(current).into(),
+            current.is_some(),
+            rows,
+            180.,
+            cx,
+        )
+    }
+
+    /// Runtime ranges, for movies (a show's length varies by episode).
+    fn length_dropdown(&self, tab: Tab, cx: &mut Context<Self>) -> AnyElement {
+        if tab != Tab::Movies {
+            return theme::nothing();
+        }
+        let Some(filter) = self.genre_filter(tab) else {
+            return theme::nothing();
+        };
+        let current = filter.length;
+        let rows = Length::ALL
+            .into_iter()
+            .map(|length| GridOption {
+                label: length.label().into(),
+                count: None,
+                selected: length == current,
+                action: Rc::new(move |this: &mut Self, cx: &mut Context<Self>| {
+                    this.change_filter(tab, |f| f.length = length, cx)
+                }),
+            })
+            .collect();
+        self.grid_dropdown(
+            tab,
+            GridMenu::Length,
+            current.label().into(),
+            current != Length::Any,
+            rows,
+            200.,
+            cx,
+        )
+    }
+
     /// Sort order: a dropdown reading "Sort: Title".
     pub(super) fn sort_control(&self, tab: Tab, cx: &mut Context<Self>) -> AnyElement {
         let (current, options): (LibrarySort, Vec<LibrarySort>) = match tab {
@@ -405,6 +494,8 @@ impl LibraryView {
 pub(super) enum GridMenu {
     Watched,
     Genre,
+    Rating,
+    Length,
     Sort,
 }
 
@@ -436,6 +527,15 @@ pub(super) fn sort_items(items: &mut [LibraryItem], sort: LibrarySort) {
         LibrarySort::Oldest => items.sort_by_cached_key(|i| {
             let year = item_year(i);
             (year.is_none(), year, title_sort_key(i.display_title()))
+        }),
+        // Unrated titles go last.
+        LibrarySort::TopRated => items.sort_by_cached_key(|i| {
+            let rating = i.metadata.as_ref().and_then(|m| m.rating_tenths);
+            (
+                rating.is_none(),
+                std::cmp::Reverse(rating),
+                title_sort_key(i.display_title()),
+            )
         }),
     }
 }

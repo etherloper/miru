@@ -1,16 +1,56 @@
-//! Genre filters for the Movies and TV Shows grids.
+//! Filters for the Movies and TV Shows grids: genre, watched state, rating and length.
 
 use std::collections::HashMap;
 use std::rc::Rc;
 
 use miru_core::library::LibraryItem;
 
+/// How long a movie runs, for the Length filter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Length {
+    #[default]
+    Any,
+    Short,
+    Medium,
+    Long,
+}
+
+impl Length {
+    pub const ALL: [Self; 4] = [Self::Any, Self::Short, Self::Medium, Self::Long];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Any => "Any length",
+            Self::Short => "Under 90 min",
+            Self::Medium => "90 min – 2 hours",
+            Self::Long => "Over 2 hours",
+        }
+    }
+
+    fn fits(self, minutes: Option<u32>) -> bool {
+        match (self, minutes) {
+            (Self::Any, _) => true,
+            (_, None) => false,
+            (Self::Short, Some(m)) => m < 90,
+            (Self::Medium, Some(m)) => (90..=120).contains(&m),
+            (Self::Long, Some(m)) => m > 120,
+        }
+    }
+}
+
+/// Minimum ratings offered, in tenths (70 = 7.0).
+pub const MIN_RATINGS: [u16; 3] = [60, 70, 80];
+
 /// Filter state for one grid: the chosen genre, whether only unwatched titles show, the
-/// genres on offer and the items shown.
+/// minimum rating and length, the genres on offer and the items shown.
 #[derive(Default)]
 pub struct GenreFilter {
     pub selected: Option<String>,
     pub unwatched_only: bool,
+    /// Minimum TMDB rating in tenths; unrated titles are hidden while it is set.
+    pub min_rating: Option<u16>,
+    /// Movies only; titles without a known runtime are hidden while it is set.
+    pub length: Length,
     /// Genres present in the grid, most common first, with how many titles carry each.
     pub genres: Vec<(String, usize)>,
     /// The grid's items narrowed by the genre and the unwatched switch.
@@ -18,6 +58,14 @@ pub struct GenreFilter {
 }
 
 impl GenreFilter {
+    /// Whether any filter is hiding titles.
+    pub fn is_narrowed(&self) -> bool {
+        self.selected.is_some()
+            || self.unwatched_only
+            || self.min_rating.is_some()
+            || self.length != Length::Any
+    }
+
     /// Recomputes the genres and filtered items from the full, sorted list. A selection whose
     /// genre has disappeared from the library is cleared.
     pub fn update(&mut self, all: &Rc<Vec<LibraryItem>>, watched: impl Fn(&LibraryItem) -> bool) {
@@ -29,13 +77,25 @@ impl GenreFilter {
         {
             self.selected = None;
         }
-        self.items = if self.selected.is_none() && !self.unwatched_only {
+        self.items = if !self.is_narrowed() {
             all.clone()
         } else {
             Rc::new(
                 all.iter()
                     .filter(|item| self.selected.as_deref().is_none_or(|g| has_genre(item, g)))
                     .filter(|item| !self.unwatched_only || !watched(item))
+                    .filter(|item| {
+                        self.min_rating.is_none_or(|min| {
+                            item.metadata
+                                .as_ref()
+                                .and_then(|m| m.rating_tenths)
+                                .is_some_and(|r| r >= min)
+                        })
+                    })
+                    .filter(|item| {
+                        self.length
+                            .fits(item.metadata.as_ref().and_then(|m| m.runtime_min))
+                    })
                     .cloned()
                     .collect(),
             )
@@ -88,6 +148,37 @@ mod tests {
             }),
             metadata_version: 0,
         }
+    }
+
+    #[test]
+    fn rating_and_length_narrow_the_grid() {
+        let rated = |title: &str, rating: Option<u16>, minutes: Option<u32>| {
+            let mut i = item(title, &[]);
+            if let Some(m) = &mut i.metadata {
+                m.rating_tenths = rating;
+                m.runtime_min = minutes;
+            }
+            i
+        };
+        let all = Rc::new(vec![
+            rated("Short and good", Some(82), Some(85)),
+            rated("Long and fine", Some(68), Some(150)),
+            rated("Unknown", None, None),
+        ]);
+        let titles = |f: &GenreFilter| -> Vec<String> {
+            f.items.iter().map(|i| i.key.title.clone()).collect()
+        };
+        let mut filter = GenreFilter {
+            min_rating: Some(70),
+            ..Default::default()
+        };
+        filter.update(&all, |_| false);
+        assert_eq!(titles(&filter), ["Short and good"]);
+
+        filter.min_rating = None;
+        filter.length = Length::Long;
+        filter.update(&all, |_| false);
+        assert_eq!(titles(&filter), ["Long and fine"]);
     }
 
     #[test]

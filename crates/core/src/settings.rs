@@ -94,10 +94,18 @@ pub enum LibrarySort {
     RecentlyAdded,
     Newest,
     Oldest,
+    /// Highest TMDB audience rating first.
+    TopRated,
 }
 
 impl LibrarySort {
-    pub const ALL: [Self; 4] = [Self::Title, Self::RecentlyAdded, Self::Newest, Self::Oldest];
+    pub const ALL: [Self; 5] = [
+        Self::Title,
+        Self::RecentlyAdded,
+        Self::Newest,
+        Self::Oldest,
+        Self::TopRated,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -105,6 +113,7 @@ impl LibrarySort {
             Self::RecentlyAdded => "Recently Added",
             Self::Newest => "Newest",
             Self::Oldest => "Oldest",
+            Self::TopRated => "Top Rated",
         }
     }
 
@@ -114,6 +123,7 @@ impl LibrarySort {
             Self::RecentlyAdded => "recent",
             Self::Newest => "newest",
             Self::Oldest => "oldest",
+            Self::TopRated => "rating",
         }
     }
 
