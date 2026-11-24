@@ -12,6 +12,7 @@ mod library_view;
 mod media_controls;
 mod memory;
 mod player_view;
+mod scrollbar;
 mod text_edit;
 mod theme;
 mod up_next;

@@ -28,6 +28,7 @@ use crate::genres::GenreFilter;
 use crate::image_cache::art_image;
 use crate::library_sync::{self, AppPaths};
 use crate::player_view::PlaybackRequest;
+use crate::scrollbar::{Scrollbar, ScrollbarDrag};
 use crate::theme::{self, glass_button, icon, primary_button, round_button};
 
 mod about;
@@ -426,6 +427,10 @@ pub struct LibraryView {
     /// Scroll positions of the home and detail pages; the nav turns solid once scrolled.
     home_scroll: ScrollHandle,
     detail_scroll: ScrollHandle,
+    /// The collection page's poster grid.
+    collection_scroll: ScrollHandle,
+    /// Where the page scrollbar's thumb is held while it's dragged.
+    scrollbar_drag: ScrollbarDrag,
 }
 
 impl EventEmitter<LibraryEvent> for LibraryView {}
@@ -554,6 +559,8 @@ impl LibraryView {
             image_sizes: Default::default(),
             home_scroll: ScrollHandle::new(),
             detail_scroll: ScrollHandle::new(),
+            collection_scroll: ScrollHandle::new(),
+            scrollbar_drag: Default::default(),
         };
         view.start_folder_watch(cx);
         view.reload();
@@ -1524,6 +1531,31 @@ fn art_layer(path: Option<String>, radius: f32, max_width: u32) -> AnyElement {
     div().absolute().inset_0().child(inner).into_any_element()
 }
 
+impl LibraryView {
+    /// The scrollbar for the page on show, following whichever scroll view it scrolls in.
+    fn page_scrollbar(&self, cx: &Context<Self>) -> Option<Scrollbar> {
+        if self.root_count == 0 && !matches!(self.page, Page::Settings) {
+            return None;
+        }
+        let handle = match &self.page {
+            Page::Browse(Tab::Home) => self.home_scroll.clone(),
+            Page::Browse(Tab::Movies | Tab::Shows) => {
+                self.grid_scroll.0.borrow().base_handle.clone()
+            }
+            Page::Collection { .. } => self.collection_scroll.clone(),
+            Page::Browse(Tab::Search) | Page::Settings | Page::Movie { .. } | Page::Show { .. } => {
+                self.detail_scroll.clone()
+            }
+        };
+        Some(Scrollbar::new(
+            handle,
+            self.scrollbar_drag.clone(),
+            NAV_HEIGHT,
+            cx.entity_id(),
+        ))
+    }
+}
+
 impl Render for LibraryView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let render_started = Instant::now();
@@ -1664,6 +1696,7 @@ impl Render for LibraryView {
                     .min_w_0()
                     .h_full()
                     .child(body)
+                    .children(self.page_scrollbar(cx))
                     .child(self.render_top_bar()),
             )
             .children(overlay)

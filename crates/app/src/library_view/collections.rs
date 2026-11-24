@@ -898,6 +898,7 @@ impl LibraryView {
                 .id("collection-grid")
                 .flex_1()
                 .overflow_y_scroll()
+                .track_scroll(&self.collection_scroll)
                 .px(px(PAGE_PADDING))
                 .pt_3()
                 .pb(px(48.))
