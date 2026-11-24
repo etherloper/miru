@@ -208,6 +208,8 @@ enum SyncStatus {
 #[derive(Clone, PartialEq)]
 struct ContinueCard {
     request: PlaybackRequest,
+    /// The movie or show, for opening its details page from the caption.
+    key: TitleKey,
     /// Show whose episode artwork hasn't been fetched yet (this card shows the backdrop until
     /// it has).
     art_pending: Option<String>,
@@ -777,6 +779,7 @@ impl LibraryView {
                     file_id: Some(entry.file.id),
                     start: entry.progress.resume_at(),
                 },
+                key,
                 title: display.into(),
                 subtitle: subtitle.into(),
                 art: still

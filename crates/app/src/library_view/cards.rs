@@ -438,7 +438,8 @@ impl Card {
             )
     }
 
-    fn continue_body(&self, card: &ContinueCard) -> Div {
+    fn continue_body(&self, card: &ContinueCard, cx: &mut Context<Self>) -> Div {
+        let key = card.key.clone();
         let height = CONTINUE_W * 9. / 16.;
         let art = div()
             .relative()
@@ -479,9 +480,13 @@ impl Card {
                     .h(px(CAPTION_H))
                     .flex()
                     .flex_col()
+                    .items_start()
                     .gap_0p5()
+                    // The title opens the movie's or show's page; the rest of the card plays.
                     .child(
                         div()
+                            .id("continue-title")
+                            .max_w_full()
                             .text_sm()
                             .font_weight(FontWeight::MEDIUM)
                             .truncate()
@@ -490,10 +495,23 @@ impl Card {
                             } else {
                                 rgba(0xe8e8edff)
                             })
+                            .hover(|s| s.underline())
+                            .on_click(cx.listener(move |card, _, _, cx| {
+                                cx.stop_propagation();
+                                let key = key.clone();
+                                card.library
+                                    .update(cx, |library, cx| {
+                                        if !library.click_ends_drag() {
+                                            library.open_key(&key, cx);
+                                        }
+                                    })
+                                    .ok();
+                            }))
                             .child(card.title.clone()),
                     )
                     .child(
                         div()
+                            .max_w_full()
                             .text_xs()
                             .text_color(theme::text_tertiary())
                             .truncate()
@@ -749,7 +767,7 @@ impl Render for Card {
             CardContent::Continue(card) => {
                 let request = card.request.clone();
                 (
-                    self.continue_body(card),
+                    self.continue_body(&card.clone(), cx),
                     Box::new(move |card, cx| card.play(request.clone(), cx)),
                 )
             }
