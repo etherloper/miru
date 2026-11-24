@@ -2961,7 +2961,7 @@ dependencies = [
 
 [[package]]
 name = "miru"
-version = "0.1.15"
+version = "0.1.16"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -2988,7 +2988,7 @@ dependencies = [
 
 [[package]]
 name = "miru-core"
-version = "0.1.15"
+version = "0.1.16"
 dependencies = [
  "regex",
  "rusqlite",
@@ -3001,7 +3001,7 @@ dependencies = [
 
 [[package]]
 name = "miru-metadata"
-version = "0.1.15"
+version = "0.1.16"
 dependencies = [
  "image",
  "miru-core",
@@ -3015,7 +3015,7 @@ dependencies = [
 
 [[package]]
 name = "miru-player"
-version = "0.1.15"
+version = "0.1.16"
 dependencies = [
  "libmpv2",
  "thiserror 2.0.21",
