@@ -15,20 +15,95 @@ use gpui::{
     relative, rgba, size,
 };
 
-/// Gap between the thumb and the page's right edge.
-const EDGE: f32 = 4.;
-/// Thumb width at rest and while hovered or dragged.
-const WIDTH: f32 = 6.;
-const WIDTH_ACTIVE: f32 = 10.;
-/// Width of the strip that responds to the pointer.
-const HIT_WIDTH: f32 = 16.;
-const MIN_THUMB: f32 = 36.;
+/// How big a scrollbar is drawn.
+#[derive(Clone, Copy, PartialEq)]
+pub enum ScrollbarSize {
+    /// For pages and panels.
+    Regular,
+    /// For small menus: thinner, closer to the edge, with a narrower strip for the pointer, so
+    /// it takes little room from the rows beside it.
+    Compact,
+}
+
+/// Measurements of one size: gap from the right edge, thumb width at rest and while hovered
+/// or dragged, the width of the strip that responds to the pointer, and the shortest thumb.
+#[derive(Clone, Copy)]
+struct Metrics {
+    edge: f32,
+    width: f32,
+    width_active: f32,
+    hit_width: f32,
+    min_thumb: f32,
+}
+
+impl ScrollbarSize {
+    fn metrics(self) -> Metrics {
+        match self {
+            Self::Regular => Metrics {
+                edge: 4.,
+                width: 6.,
+                width_active: 10.,
+                hit_width: 16.,
+                min_thumb: 36.,
+            },
+            Self::Compact => Metrics {
+                edge: 3.,
+                width: 3.,
+                width_active: 5.,
+                hit_width: 10.,
+                min_thumb: 24.,
+            },
+        }
+    }
+
+    /// Room to leave at the right of an area's content so the thumb and its pointer strip
+    /// never cover it.
+    pub fn gutter(self) -> f32 {
+        self.metrics().hit_width
+    }
+}
+
 /// Space kept clear at the ends of the track.
 const PAD: f32 = 4.;
 
 /// Drag state kept by the view between frames: while dragging, where in the thumb the
 /// pointer took hold of it.
 pub type ScrollbarDrag = Rc<Cell<Option<f32>>>;
+
+/// A smaller scrolling area (a panel, list or menu) and its scrollbar, kept by the view.
+///
+/// Track the area with `.track_scroll(&area.handle)` and add [`ScrollArea::scrollbar`] as its
+/// last child: the scrollbar draws over the area's right edge from the handle, wherever the
+/// content has scrolled to.
+#[derive(Clone, Default)]
+pub struct ScrollArea {
+    pub handle: ScrollHandle,
+    drag: ScrollbarDrag,
+}
+
+impl ScrollArea {
+    pub fn scrollbar(&self, view: EntityId) -> Scrollbar {
+        Scrollbar::new(self.handle.clone(), self.drag.clone(), 0., view)
+    }
+
+    /// A thin scrollbar for a small menu. Leave [`ScrollbarSize::gutter`] free at the right of
+    /// the menu's rows so it never sits over their text.
+    pub fn compact_scrollbar(&self, view: EntityId) -> Scrollbar {
+        Scrollbar {
+            size: ScrollbarSize::Compact,
+            ..self.scrollbar(view)
+        }
+    }
+
+    /// Back to the top, for an area that opens afresh (a menu shown again starts at the top,
+    /// as it did when it kept no handle).
+    pub fn reset(&self) {
+        if self.handle.offset() != Point::default() {
+            self.handle.set_offset(Point::default());
+        }
+        self.drag.set(None);
+    }
+}
 
 pub struct Scrollbar {
     handle: ScrollHandle,
@@ -37,6 +112,7 @@ pub struct Scrollbar {
     top_inset: f32,
     /// The view to re-render when the scrollbar moves the page.
     view: EntityId,
+    size: ScrollbarSize,
 }
 
 impl Scrollbar {
@@ -47,6 +123,7 @@ impl Scrollbar {
             drag,
             top_inset,
             view,
+            size: ScrollbarSize::Regular,
         }
     }
 }
@@ -59,10 +136,16 @@ struct Geometry {
     thumb_h: f32,
     right: f32,
     max: f32,
+    metrics: Metrics,
 }
 
 impl Geometry {
-    fn measure(handle: &ScrollHandle, area: Bounds<Pixels>, top_inset: f32) -> Option<Self> {
+    fn measure(
+        handle: &ScrollHandle,
+        area: Bounds<Pixels>,
+        top_inset: f32,
+        metrics: Metrics,
+    ) -> Option<Self> {
         let max = f32::from(handle.max_offset().y);
         let view = handle.bounds();
         let view_h = f32::from(view.size.height);
@@ -71,25 +154,29 @@ impl Geometry {
         }
         let track_top = f32::from(view.top()).max(f32::from(area.top()) + top_inset) + PAD;
         let track_h = f32::from(view.bottom()) - PAD - track_top;
-        if track_h < MIN_THUMB * 2. {
+        if track_h < metrics.min_thumb * 2. {
             return None;
         }
-        let thumb_h = (track_h * view_h / (view_h + max)).clamp(MIN_THUMB, track_h);
+        let thumb_h = (track_h * view_h / (view_h + max)).clamp(metrics.min_thumb, track_h);
         let progress = (-f32::from(handle.offset().y) / max).clamp(0., 1.);
         Some(Self {
             track_top,
             track_h,
             thumb_top: track_top + (track_h - thumb_h) * progress,
             thumb_h,
-            right: f32::from(view.right()) - EDGE,
+            right: f32::from(view.right()) - metrics.edge,
             max,
+            metrics,
         })
     }
 
     fn hit_bounds(&self) -> Bounds<Pixels> {
         Bounds::new(
-            point(px(self.right + EDGE - HIT_WIDTH), px(self.track_top)),
-            size(px(HIT_WIDTH), px(self.track_h)),
+            point(
+                px(self.right + self.metrics.edge - self.metrics.hit_width),
+                px(self.track_top),
+            ),
+            size(px(self.metrics.hit_width), px(self.track_h)),
         )
     }
 
@@ -152,7 +239,7 @@ impl Element for Scrollbar {
         window: &mut Window,
         _: &mut App,
     ) -> ScrollbarPrepaint {
-        let geometry = Geometry::measure(&self.handle, bounds, self.top_inset);
+        let geometry = Geometry::measure(&self.handle, bounds, self.top_inset, self.size.metrics());
         // Wheel scrolling over the strip still reaches the page underneath.
         let hitbox = geometry
             .map(|g| window.insert_hitbox(g.hit_bounds(), HitboxBehavior::BlockMouseExceptScroll));
@@ -177,7 +264,11 @@ impl Element for Scrollbar {
         let dragging = self.drag.get().is_some();
         let hovered = hitbox.is_hovered(window);
         let active = dragging || hovered;
-        let width = if active { WIDTH_ACTIVE } else { WIDTH };
+        let width = if active {
+            g.metrics.width_active
+        } else {
+            g.metrics.width
+        };
         let thumb = Bounds::new(
             point(px(g.right - width), px(g.thumb_top)),
             size(px(width), px(g.thumb_h)),

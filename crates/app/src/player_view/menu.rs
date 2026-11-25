@@ -169,6 +169,7 @@ impl PlayerView {
             MenuPage::Main => 0,
         };
         self.menu = Some(page);
+        self.menu_scroll.reset();
         self.menu_forward = true;
         self.menu_page_epoch += 1;
         self.poke(cx);
@@ -421,6 +422,9 @@ impl PlayerView {
                 }))
         });
         let rows: Vec<_> = rows.collect();
+        // A list taller than the menu gets a thin scrollbar, with room kept for it beside the
+        // rows so it never sits over their text.
+        let scrolls = rows.len() as f32 * ROW_H > max_list;
         let header = Self::page_header(section.label(), cx);
         let footer = (section == MenuSection::Audio).then(|| {
             let output = match self.audio_output.as_deref() {
@@ -453,6 +457,10 @@ impl PlayerView {
                     .id(("menu-list", section as usize))
                     .max_h(px(max_list))
                     .overflow_y_scroll()
+                    .track_scroll(&self.menu_scroll.handle)
+                    .when(scrolls, |d| {
+                        d.pr(px(crate::scrollbar::ScrollbarSize::Compact.gutter()))
+                    })
                     .flex()
                     .flex_col()
                     .when(empty, |d| {
@@ -465,7 +473,8 @@ impl PlayerView {
                                 .child("No tracks"),
                         )
                     })
-                    .children(rows),
+                    .children(rows)
+                    .child(self.menu_scroll.compact_scrollbar(cx.entity_id())),
             )
             .children(footer)
             .into_any_element()

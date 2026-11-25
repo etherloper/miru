@@ -430,10 +430,12 @@ impl LibraryView {
                     .id("fix-results")
                     .max_h(px(420.))
                     .overflow_y_scroll()
+                    .track_scroll(&self.fix_results_scroll.handle)
                     .p_1p5()
                     .flex()
                     .flex_col()
                     .children(rows)
+                    .child(self.fix_results_scroll.scrollbar(cx.entity_id()))
                     .into_any_element()
             }
         };

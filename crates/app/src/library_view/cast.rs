@@ -21,6 +21,12 @@ pub(super) struct CastPane {
     person: Option<PersonView>,
 }
 
+impl CastPane {
+    pub(super) fn showing_person(&self) -> bool {
+        self.person.is_some()
+    }
+}
+
 struct PersonView {
     member: CastMember,
     /// Library titles they appear in, with the character they play.
@@ -80,6 +86,7 @@ impl LibraryView {
             elsewhere,
             person: None,
         });
+        self.cast_list_scroll.reset();
         self.cast_epoch += 1;
         cx.notify();
 
@@ -153,6 +160,7 @@ impl LibraryView {
         let credits = self.library_credits(member.person_id);
         if let Some(pane) = &mut self.cast_pane {
             pane.person = Some(PersonView { member, credits });
+            self.person_scroll.reset();
             cx.notify();
         }
     }
@@ -354,11 +362,13 @@ impl LibraryView {
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()
+            .track_scroll(&self.cast_list_scroll.handle)
             .p_3()
             .flex()
             .flex_col()
             .gap_0p5()
             .children(rows)
+            .child(self.cast_list_scroll.scrollbar(cx.entity_id()))
             .into_any_element()
     }
 
@@ -459,6 +469,7 @@ impl LibraryView {
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()
+            .track_scroll(&self.person_scroll.handle)
             .p_6()
             .flex()
             .flex_col()
@@ -512,6 +523,7 @@ impl LibraryView {
                     })
                     .child(div().flex().flex_wrap().gap_4().children(posters)),
             )
+            .child(self.person_scroll.scrollbar(cx.entity_id()))
             .into_any_element()
     }
 }

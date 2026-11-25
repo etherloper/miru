@@ -455,9 +455,11 @@ impl LibraryView {
                 .w(px(width))
                 .max_h(px(420.))
                 .overflow_y_scroll()
+                .track_scroll(&self.grid_menu_scroll.handle)
                 .flex()
                 .flex_col()
                 .children(rows)
+                .child(self.grid_menu_scroll.scrollbar(cx.entity_id()))
                 .on_mouse_down_out(cx.listener(|this, _, _, cx| {
                     this.close_genre_menu();
                     cx.notify();

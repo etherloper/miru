@@ -121,6 +121,8 @@ pub struct PlayerView {
     menu_open_epoch: usize,
     menu_page_epoch: usize,
     menu_forward: bool,
+    /// The track or chapter list on a menu page, and its scrollbar.
+    menu_scroll: crate::scrollbar::ScrollArea,
     tracks: Vec<Track>,
     /// Channel layout mpv is sending to the audio device, shown in the Audio menu.
     audio_output: Option<String>,
@@ -232,6 +234,7 @@ impl PlayerView {
             menu_open_epoch: 0,
             menu_page_epoch: 0,
             menu_forward: true,
+            menu_scroll: Default::default(),
             tracks: Vec::new(),
             audio_output: None,
             seek_bounds: Rc::default(),

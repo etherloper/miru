@@ -28,7 +28,7 @@ use crate::genres::GenreFilter;
 use crate::image_cache::art_image;
 use crate::library_sync::{self, AppPaths};
 use crate::player_view::PlaybackRequest;
-use crate::scrollbar::{Scrollbar, ScrollbarDrag};
+use crate::scrollbar::{ScrollArea, Scrollbar, ScrollbarDrag};
 use crate::theme::{self, glass_button, icon, primary_button, round_button};
 
 mod about;
@@ -438,6 +438,12 @@ pub struct LibraryView {
     collection_scroll: ScrollHandle,
     /// Where the page scrollbar's thumb is held while it's dragged.
     scrollbar_drag: ScrollbarDrag,
+    /// The smaller scrolling areas, each with its own scrollbar.
+    cast_list_scroll: ScrollArea,
+    person_scroll: ScrollArea,
+    fix_results_scroll: ScrollArea,
+    search_hits_scroll: ScrollArea,
+    grid_menu_scroll: ScrollArea,
 }
 
 impl EventEmitter<LibraryEvent> for LibraryView {}
@@ -569,6 +575,11 @@ impl LibraryView {
             detail_scroll: ScrollHandle::new(),
             collection_scroll: ScrollHandle::new(),
             scrollbar_drag: Default::default(),
+            cast_list_scroll: Default::default(),
+            person_scroll: Default::default(),
+            fix_results_scroll: Default::default(),
+            search_hits_scroll: Default::default(),
+            grid_menu_scroll: Default::default(),
         };
         view.start_folder_watch(cx);
         view.reload();
@@ -1543,6 +1554,30 @@ fn art_layer(path: Option<String>, radius: f32, max_width: u32) -> AnyElement {
 }
 
 impl LibraryView {
+    /// Puts the scroll areas of panels and menus that are closed back at the top, so each
+    /// opens at the top as it did before they kept a scroll handle.
+    fn reset_closed_scroll_areas(&self) {
+        if self.genre_menu.is_none() {
+            self.grid_menu_scroll.reset();
+        }
+        if self.fix_match.is_none() {
+            self.fix_results_scroll.reset();
+        }
+        if !self.search_overlay {
+            self.search_hits_scroll.reset();
+        }
+        if self.cast_pane.is_none() {
+            self.cast_list_scroll.reset();
+        }
+        if !self
+            .cast_pane
+            .as_ref()
+            .is_some_and(cast::CastPane::showing_person)
+        {
+            self.person_scroll.reset();
+        }
+    }
+
     /// The scrollbar for the page on show, following whichever scroll view it scrolls in.
     fn page_scrollbar(&self, cx: &Context<Self>) -> Option<Scrollbar> {
         if self.root_count == 0 && !matches!(self.page, Page::Settings) {
@@ -1570,6 +1605,7 @@ impl LibraryView {
 impl Render for LibraryView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let render_started = Instant::now();
+        self.reset_closed_scroll_areas();
         self.step_shelf_glide(window);
         self.step_poster_drag(window);
         if matches!(self.page, Page::Settings) {
