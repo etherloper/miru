@@ -54,8 +54,11 @@ pub(super) struct Card {
     hovered: bool,
     /// Bumped on every hover change so the lift animation restarts.
     hover_epoch: usize,
-    /// Whether the card has been hovered at all; untouched cards skip the leave animation.
+    /// Whether the card has lifted and not yet settled; others skip the leave animation.
     touched: bool,
+    /// The pointer is on a Continue Watching card's artwork. Only that lifts the card: the
+    /// title under it opens the details page, so lifting there would suggest it plays.
+    art_hovered: bool,
 }
 
 struct Slot {
@@ -107,6 +110,7 @@ impl LibraryView {
                     hovered: false,
                     hover_epoch: 0,
                     touched: false,
+                    art_hovered: false,
                 });
                 self.cards.0.borrow_mut().insert(
                     slot,
@@ -220,14 +224,40 @@ impl LibraryView {
 impl Card {
     fn set_hovered(&mut self, hovered: bool, cx: &mut Context<Self>) {
         if self.hovered != hovered {
-            self.hovered = hovered;
-            self.touched = true;
-            self.hover_epoch += 1;
+            self.update_lift(|card| card.hovered = hovered);
             cx.notify();
-            // Episode cards change height with hover, which the library lays out.
-            if matches!(self.content, CardContent::Episode { .. }) {
-                self.library.update(cx, |_, cx| cx.notify()).ok();
-            }
+        }
+    }
+
+    fn set_art_hovered(&mut self, hovered: bool, cx: &mut Context<Self>) {
+        if self.art_hovered != hovered {
+            self.update_lift(|card| card.art_hovered = hovered);
+            cx.notify();
+        }
+    }
+
+    /// Whether the artwork is raised. Continue Watching cards follow the pointer on the artwork
+    /// alone; the rest lift whenever the card is hovered.
+    fn lifted(&self) -> bool {
+        match self.content {
+            CardContent::Continue(_) => self.art_hovered,
+            _ => self.hovered,
+        }
+    }
+
+    /// Applies a hover change, restarting the lift animation (and the hover fade-ins keyed on
+    /// the same epoch) only when it raises or lowers the card. A hover change that leaves the
+    /// card where it was (pointer moving between a Continue Watching card's caption and the
+    /// outside) plays nothing.
+    fn update_lift(&mut self, change: impl FnOnce(&mut Self)) {
+        let was_lifted = self.lifted();
+        change(self);
+        let lifted = self.lifted();
+        if lifted != was_lifted {
+            self.hover_epoch += 1;
+            self.touched = true;
+        } else if !lifted {
+            self.touched = false;
         }
     }
 
@@ -243,7 +273,7 @@ impl Card {
         };
         let animation = || Animation::new(theme::motion(200)).with_easing(ease_out_quint());
         let epoch = self.hover_epoch;
-        if self.hovered {
+        if self.lifted() {
             art.with_animation(("card-lift-in", epoch), animation(), apply)
                 .into_any_element()
         } else if self.touched {
@@ -457,8 +487,16 @@ impl Card {
             .gap(px(CARD_GAP))
             .child(
                 div()
+                    .id("continue-art")
                     .w(px(CONTINUE_W))
                     .h(px(height))
+                    // Only the artwork lifts: the title under it opens the details page, so a
+                    // lift while pointing at the caption would suggest it plays.
+                    .on_hover(
+                        cx.listener(|card, hovered: &bool, _, cx| {
+                            card.set_art_hovered(*hovered, cx)
+                        }),
+                    )
                     .child(self.lift(art, CONTINUE_W, height)),
             )
             .child(
@@ -481,7 +519,8 @@ impl Card {
                             } else {
                                 rgba(0xe8e8edff)
                             })
-                            .hover(|s| s.underline())
+                            // Accent on hover, like "View full cast".
+                            .hover(|s| s.text_color(theme::accent()))
                             .on_click(cx.listener(move |card, _, _, cx| {
                                 cx.stop_propagation();
                                 let key = key.clone();
