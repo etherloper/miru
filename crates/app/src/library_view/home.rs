@@ -140,8 +140,30 @@ impl LibraryView {
                 el.opacity(if fresh { t } else { 1. })
             });
 
-        // Page dots, centred along the bottom of the banner (above the shelves that overlap it).
+        // Page dots, centred along the bottom of the banner (above the shelves that overlap it),
+        // with a white dot over the active one that glides to the next on a change.
         let dots = (self.featured.len() > 1).then(|| {
+            let dot_x = |i: usize| i as f32 * (HERO_DOT + HERO_DOT_GAP);
+            let to = dot_x(self.hero_index);
+            // Glide only for a change that just happened, or it would replay on returning to
+            // Home (animation state is lost while the player is in front).
+            let from = self
+                .hero_previous_index
+                .filter(|_| self.hero_epoch > 0 && self.hero_changed_at.elapsed() < HERO_DOT_GLIDE)
+                .map_or(to, dot_x);
+            let active = div()
+                .absolute()
+                .top_0()
+                .left(px(to))
+                .size(px(HERO_DOT))
+                .rounded_full()
+                .bg(theme::text())
+                .with_animation(
+                    ("hero-dot-glide", self.hero_epoch),
+                    Animation::new(theme::motion(HERO_DOT_GLIDE.as_millis() as u64))
+                        .with_easing(ease_in_out),
+                    move |el, t| el.left(px(from + (to - from) * t)),
+                );
             div()
                 .absolute()
                 .left_0()
@@ -149,26 +171,26 @@ impl LibraryView {
                 .bottom(px(HERO_DOTS_BOTTOM))
                 .flex()
                 .justify_center()
-                .items_center()
-                .gap_2()
-                .children((0..self.featured.len()).map(|i| {
-                    let active = i == self.hero_index;
+                .child(
                     div()
-                        .id(("hero-dot", i))
-                        .h(px(8.))
-                        .w(px(if active { 24. } else { 8. }))
-                        .rounded_full()
-                        .cursor_pointer()
-                        .bg(if active {
-                            theme::text()
-                        } else {
-                            rgba(0xffffff59)
-                        })
-                        .hover(|s| s.bg(theme::text()))
-                        .on_click(cx.listener(move |hero: &mut HeroView, _, _, cx| {
-                            hero.on_library(cx, |this, cx| this.show_hero(i, cx))
+                        .relative()
+                        .flex()
+                        .items_center()
+                        .gap(px(HERO_DOT_GAP))
+                        .children((0..self.featured.len()).map(|i| {
+                            div()
+                                .id(("hero-dot", i))
+                                .size(px(HERO_DOT))
+                                .rounded_full()
+                                .cursor_pointer()
+                                .bg(rgba(0xffffff59))
+                                .hover(|s| s.bg(rgba(0xffffffa6)))
+                                .on_click(cx.listener(move |hero: &mut HeroView, _, _, cx| {
+                                    hero.on_library(cx, |this, cx| this.show_hero(i, cx))
+                                }))
                         }))
-                }))
+                        .child(active),
+                )
         });
 
         // Previous / next arrows in the page margins, shown while the banner is hovered.

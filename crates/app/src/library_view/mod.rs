@@ -82,6 +82,10 @@ const HERO_INTERVAL: Duration = Duration::from_secs(9);
 const HERO_TICK: Duration = Duration::from_millis(250);
 /// Distance of the banner's page dots from its bottom edge (the shelves overlap below).
 const HERO_DOTS_BOTTOM: f32 = 116.;
+/// The hero's page dots: size, spacing, and how long the active dot takes to glide across.
+const HERO_DOT: f32 = 8.;
+const HERO_DOT_GAP: f32 = 8.;
+const HERO_DOT_GLIDE: Duration = Duration::from_millis(450);
 /// Left/Right page the banner only while the home page is scrolled less than this.
 const HERO_KEYS_MAX_SCROLL: f32 = 320.;
 const HERO_FADE: Duration = Duration::from_millis(900);
@@ -371,6 +375,8 @@ pub struct LibraryView {
     hero_index: usize,
     /// The title shown before the current one, faded out over the change.
     hero_previous: Option<LibraryItem>,
+    /// The page dot that was active before the change, for the active dot to glide from.
+    hero_previous_index: Option<usize>,
     /// Whole-library mode: the shuffle (new each launch) and how many sets have been dealt.
     hero_seed: u64,
     hero_round: u64,
@@ -519,6 +525,7 @@ impl LibraryView {
             continue_cards: Vec::new(),
             hero_index: 0,
             hero_previous: None,
+            hero_previous_index: None,
             hero_seed: std::collections::hash_map::RandomState::new().hash_one(0u8),
             hero_round: 0,
             hero_avoid: None,
@@ -725,6 +732,7 @@ impl LibraryView {
         {
             self.hero_index = 0;
             self.hero_previous = None;
+            self.hero_previous_index = None;
         }
         self.featured = featured;
     }
@@ -986,6 +994,7 @@ impl LibraryView {
         self.featured = self.pick_featured();
         tracing::debug!(round = self.hero_round, "hero: new set");
         self.hero_previous = current;
+        self.hero_previous_index = Some(self.hero_index);
         self.hero_index = 0;
         self.hero_epoch += 1;
         self.hero_changed_at = Instant::now();
@@ -1000,6 +1009,7 @@ impl LibraryView {
         }
         tracing::debug!(from = self.hero_index, to = index, "hero changed");
         self.hero_previous = self.featured.get(self.hero_index).cloned();
+        self.hero_previous_index = Some(self.hero_index);
         self.hero_index = index;
         self.hero_epoch += 1;
         self.hero_changed_at = Instant::now();
