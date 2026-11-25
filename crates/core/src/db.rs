@@ -237,6 +237,12 @@ const MIGRATIONS: &[&str] = &[
         PRIMARY KEY (kind, title, year)
     );
 ",
+    r"
+    -- Anime TMDB lists as one long season (local S02E01 is its S01E25) found nothing past the
+    -- first season. Those episodes are now matched through TMDB's 'Seasons' episode group, so
+    -- look up again every episode TMDB gave nothing for.
+    UPDATE episode_art SET tmdb_checked = 0 WHERE name IS NULL AND overview IS NULL;
+",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]

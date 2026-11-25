@@ -340,6 +340,22 @@ impl Tmdb {
         }
     }
 
+    /// The show's episodes arranged in TMDB's "Seasons" episode group, keyed by season, or an
+    /// empty map when it has none. TMDB lists many anime as one long season; this grouping
+    /// splits them into the seasons people (and file names) use.
+    pub fn tv_group_seasons(&self, tv_id: i64) -> Result<HashMap<u16, Vec<TmdbEpisode>>> {
+        let request = self.agent.get(format!("{API}/tv/{tv_id}/episode_groups"));
+        let list: EpisodeGroupsResponse = self.authed(request).call()?.body_mut().read_json()?;
+        let Some(group) = pick_seasons_group(&list.results) else {
+            return Ok(HashMap::new());
+        };
+        let request = self
+            .agent
+            .get(format!("{API}/tv/episode_group/{}", group.id));
+        let group: EpisodeGroupResponse = self.authed(request).call()?.body_mut().read_json()?;
+        Ok(seasons_from_group(group))
+    }
+
     fn authed<B>(&self, request: ureq::RequestBuilder<B>) -> ureq::RequestBuilder<B> {
         match &self.credential {
             Credential::Bearer(token) => request.header("Authorization", format!("Bearer {token}")),
@@ -498,6 +514,81 @@ pub struct TmdbEpisode {
 struct SeasonResponse {
     #[serde(default)]
     episodes: Vec<TmdbEpisode>,
+}
+
+/// TMDB's alternative episode orderings for a show (`/tv/{id}/episode_groups`).
+#[derive(Deserialize)]
+struct EpisodeGroupsResponse {
+    #[serde(default)]
+    results: Vec<EpisodeGroupSummary>,
+}
+
+#[derive(Deserialize)]
+struct EpisodeGroupSummary {
+    id: String,
+    #[serde(default)]
+    name: String,
+    /// 6 is "Seasons" (TV-style seasons); others are absolute, story arcs, DVD and so on.
+    #[serde(rename = "type")]
+    kind: u8,
+    #[serde(default)]
+    episode_count: u32,
+}
+
+/// One episode group (`/tv/episode_group/{id}`): its groups, each a season of episodes.
+#[derive(Deserialize)]
+struct EpisodeGroupResponse {
+    #[serde(default)]
+    groups: Vec<EpisodeGroupSeason>,
+}
+
+#[derive(Deserialize)]
+struct EpisodeGroupSeason {
+    /// The season number: 0 for specials, then 1, 2, …
+    order: u16,
+    #[serde(default)]
+    episodes: Vec<GroupEpisode>,
+}
+
+#[derive(Deserialize)]
+struct GroupEpisode {
+    /// Position within its season, from 0.
+    order: u16,
+    name: Option<String>,
+    overview: Option<String>,
+    still_path: Option<String>,
+    runtime: Option<u32>,
+}
+
+/// The "Seasons" grouping among a show's episode groups, if it has one. Some shows have more
+/// than one; one actually called "Seasons" wins, then the one covering the most episodes.
+fn pick_seasons_group(groups: &[EpisodeGroupSummary]) -> Option<&EpisodeGroupSummary> {
+    groups
+        .iter()
+        .filter(|g| g.kind == 6)
+        .max_by_key(|g| (g.name.eq_ignore_ascii_case("seasons"), g.episode_count))
+}
+
+/// A "Seasons" episode group as season number → episodes numbered within that season.
+fn seasons_from_group(group: EpisodeGroupResponse) -> HashMap<u16, Vec<TmdbEpisode>> {
+    group
+        .groups
+        .into_iter()
+        .map(|season| {
+            let episodes = season
+                .episodes
+                .into_iter()
+                .map(|e| TmdbEpisode {
+                    episode_number: e.order + 1,
+                    name: e.name,
+                    overview: e.overview,
+                    still_path: e.still_path,
+                    runtime: e.runtime,
+                })
+                .collect();
+            (season.order, episodes)
+        })
+        .collect()
 }
 
 /// Stores posters, backdrops and episode stills on disk, named by TMDB id (or file id for
@@ -844,6 +935,8 @@ pub fn enrich_episodes(
             .any(|i| i.key.title.eq_ignore_ascii_case(show));
     let existing = db.episode_art(show)?;
     let mut seasons: HashMap<u16, Option<Vec<TmdbEpisode>>> = HashMap::new();
+    // Fetched at most once, the first time a season isn't on TMDB under its own number.
+    let mut group_seasons: Option<Option<HashMap<u16, Vec<TmdbEpisode>>>> = None;
 
     let mut saved = 0;
     for file in pending {
@@ -855,16 +948,30 @@ pub fn enrich_episodes(
         };
         let lookup = match (tmdb, tv_id) {
             (Some(t), Some(id)) => {
-                let episodes =
-                    seasons
-                        .entry(season)
-                        .or_insert_with(|| match t.tv_season(id, season) {
-                            Ok(eps) => Some(eps),
-                            Err(e) => {
-                                tracing::warn!(show, season, "TMDB season lookup failed: {e}");
-                                None
-                            }
-                        });
+                let episodes = seasons.entry(season).or_insert_with(|| {
+                    let eps = match t.tv_season(id, season) {
+                        Ok(eps) => eps,
+                        Err(e) => {
+                            tracing::warn!(show, season, "TMDB season lookup failed: {e}");
+                            return None;
+                        }
+                    };
+                    if !eps.is_empty() {
+                        return Some(eps);
+                    }
+                    // Not a season on TMDB: it may list the show as one long season, with
+                    // this season inside it. Its "Seasons" episode group splits it up.
+                    let groups = group_seasons.get_or_insert_with(|| {
+                        t.tv_group_seasons(id)
+                            .inspect_err(|e| {
+                                tracing::warn!(show, "TMDB episode group lookup failed: {e}")
+                            })
+                            .ok()
+                    });
+                    groups
+                        .as_ref()
+                        .map(|groups| groups.get(&season).cloned().unwrap_or_default())
+                });
                 match episodes {
                     None => EpisodeLookup::Failed,
                     Some(eps) => eps
@@ -1188,6 +1295,45 @@ mod tests {
         assert_eq!(season.episodes[1].still_path, None);
         let empty: SeasonResponse = serde_json::from_str("{}").unwrap();
         assert!(empty.episodes.is_empty());
+    }
+
+    #[test]
+    fn picks_the_seasons_episode_group() {
+        let list: EpisodeGroupsResponse = serde_json::from_str(
+            r#"{"results":[
+                {"id":"arcs","name":"Story Arcs","type":5,"episode_count":59},
+                {"id":"cours","name":"Cours","type":6,"episode_count":70},
+                {"id":"seasons","name":"Seasons","type":6,"episode_count":64}]}"#,
+        )
+        .unwrap();
+        assert_eq!(pick_seasons_group(&list.results).unwrap().id, "seasons");
+        let none: EpisodeGroupsResponse =
+            serde_json::from_str(r#"{"results":[{"id":"a","name":"Absolute","type":2}]}"#).unwrap();
+        assert!(pick_seasons_group(&none.results).is_none());
+    }
+
+    #[test]
+    fn splits_a_long_tmdb_season_by_its_episode_group() {
+        // TMDB's Jujutsu Kaisen: one 59-episode season; the group puts its episode 25 first
+        // in Season 2. Episodes are listed out of order, as TMDB sometimes does.
+        let group: EpisodeGroupResponse = serde_json::from_str(
+            r#"{"groups":[
+                {"order":2,"name":"Season 2","episodes":[
+                    {"order":1,"episode_number":26,"season_number":1,"name":"Hidden Inventory 2",
+                     "overview":"","still_path":null},
+                    {"order":0,"episode_number":25,"season_number":1,"name":"Hidden Inventory",
+                     "overview":"Gojo and Geto.","still_path":"/s1e25.jpg","runtime":24}]},
+                {"order":0,"name":"Specials","episodes":[]}]}"#,
+        )
+        .unwrap();
+        let seasons = seasons_from_group(group);
+        let second = &seasons[&2];
+        let first = second.iter().find(|e| e.episode_number == 1).unwrap();
+        assert_eq!(first.name.as_deref(), Some("Hidden Inventory"));
+        assert_eq!(first.overview.as_deref(), Some("Gojo and Geto."));
+        assert_eq!(first.runtime, Some(24));
+        assert!(second.iter().any(|e| e.episode_number == 2));
+        assert!(seasons[&0].is_empty());
     }
 
     #[test]
