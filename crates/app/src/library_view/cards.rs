@@ -17,11 +17,13 @@ use crate::image_cache::BoundedImageCache;
 const CARD_GAP: f32 = 12.;
 /// Episode caption: the "EPISODE 3 · 52 min" line, the name, and the gaps between them.
 const EPISODE_META_H: f32 = 18. + 4. + 24. + 4.;
-/// Synopsis lines shown at rest and while hovered.
-const SYNOPSIS_REST_LINES: f32 = 2.;
-const SYNOPSIS_HOVER_LINES: usize = 8;
-/// Rough characters per synopsis line at the card's width, to size the hovered card.
-const SYNOPSIS_CHARS_PER_LINE: usize = 48;
+/// Synopsis lines that fit over an episode thumbnail, above its progress bar.
+const SYNOPSIS_OVERLAY_LINES: usize = 7;
+/// Synopsis text's distance from the thumbnail's top and left edges.
+const SYNOPSIS_INSET: f32 = 16.;
+/// Synopsis text width: the thumbnail less the inset, and room on the right for the watched
+/// check in the top corner.
+const SYNOPSIS_OVERLAY_W: f32 = EPISODE_CARD_W - SYNOPSIS_INSET - 48.;
 /// Cards not drawn for this long are dropped on the next reload.
 const CARD_IDLE: Duration = Duration::from_secs(120);
 
@@ -190,9 +192,6 @@ impl LibraryView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let accent = show_meta.accent_rgb;
-        let overview_len = art
-            .and_then(|a| a.overview.as_ref())
-            .map(|o| o.chars().count());
         self.cached_card(
             (scope, file.id.to_string()),
             |c| {
@@ -206,24 +205,11 @@ impl LibraryView {
                 progress,
                 art: art.cloned(),
             },
-            |hovered| {
-                let lines = overview_len.map_or(0., |len| {
-                    if hovered {
-                        len.div_ceil(SYNOPSIS_CHARS_PER_LINE)
-                            .clamp(SYNOPSIS_REST_LINES as usize, SYNOPSIS_HOVER_LINES)
-                            as f32
-                    } else {
-                        SYNOPSIS_REST_LINES
-                    }
-                });
-                let synopsis = if lines > 0. {
-                    4. + lines * SYNOPSIS_LINE_H
-                } else {
-                    0.
-                };
+            // The synopsis sits over the thumbnail, so hovering doesn't change the size.
+            |_| {
                 (
                     EPISODE_CARD_W,
-                    EPISODE_CARD_W * 9. / 16. + CARD_GAP + EPISODE_META_H + synopsis,
+                    EPISODE_CARD_W * 9. / 16. + CARD_GAP + EPISODE_META_H,
                 )
             },
             cx,
@@ -555,6 +541,35 @@ impl Card {
         let width = EPISODE_CARD_W;
         let height = width * 9. / 16.;
         let hovered = self.hovered;
+        let overview = art.and_then(|a| a.overview.clone());
+        // Hovering shows the synopsis over the thumbnail; an episode without one shows the play
+        // button instead.
+        let synopsis_overlay = overview.filter(|_| hovered).map(|o| {
+            div()
+                .absolute()
+                .inset_0()
+                .bg(rgba(0x000000c7))
+                .child(
+                    // A fixed width, not the thumbnail's: the thumbnail grows while it lifts on
+                    // hover, and text sized to it would re-wrap every frame of that animation.
+                    div()
+                        .absolute()
+                        .top(px(SYNOPSIS_INSET))
+                        .left(px(SYNOPSIS_INSET))
+                        .w(px(SYNOPSIS_OVERLAY_W))
+                        .text_sm()
+                        .line_height(px(SYNOPSIS_LINE_H))
+                        .line_clamp(SYNOPSIS_OVERLAY_LINES)
+                        .text_color(theme::text())
+                        .child(o),
+                )
+                .with_animation(
+                    ("episode-synopsis-in", self.hover_epoch),
+                    Animation::new(theme::motion(160)).with_easing(ease_out_quint()),
+                    |el, t| el.opacity(t),
+                )
+        });
+        let show_play = hovered && synopsis_overlay.is_none();
 
         let thumb = div()
             .relative()
@@ -588,7 +603,8 @@ impl Card {
                 linear_color_stop(rgba(0x000000a6), 0.),
                 linear_color_stop(rgba(0x00000000), 0.45),
             )))
-            .when(hovered, |d| {
+            .children(synopsis_overlay)
+            .when(show_play, |d| {
                 d.child(
                     div()
                         .absolute()
@@ -673,13 +689,6 @@ impl Card {
         if p.resume_at().is_some() {
             details.push(remaining(&p));
         }
-        let overview = art.and_then(|a| a.overview.clone());
-        let synopsis_lines = if hovered {
-            SYNOPSIS_HOVER_LINES as f32
-        } else {
-            SYNOPSIS_REST_LINES
-        };
-
         div()
             .w(px(width))
             .flex()
@@ -723,23 +732,7 @@ impl Card {
                                 theme::text()
                             })
                             .child(name),
-                    )
-                    .children(overview.map(|o| {
-                        div()
-                            .text_sm()
-                            .line_height(px(SYNOPSIS_LINE_H))
-                            // Two lines at rest; hovering the card reveals most of the synopsis.
-                            // Clipped by height rather than `line_clamp`: GPUI caches wrapped
-                            // text without the clamp, so a changing clamp keeps the old layout.
-                            .overflow_hidden()
-                            .max_h(px(SYNOPSIS_LINE_H * synopsis_lines))
-                            .text_color(if hovered {
-                                theme::text()
-                            } else {
-                                theme::text_secondary()
-                            })
-                            .child(o)
-                    })),
+                    ),
             )
     }
 }

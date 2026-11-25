@@ -338,7 +338,7 @@ impl LibraryView {
     ) -> impl IntoElement {
         let viewport_h = f32::from(window.viewport_size().height);
         // A movie page is just the hero, so it fills the window (no empty band below). A show
-        // page leaves room under it for the episode row, synopsis included, without scrolling.
+        // page leaves room under it for the episode row without scrolling.
         let is_show = back_to == Tab::Shows;
         let min_height = if is_show {
             // The smaller of 72% of the window and what leaves the episode row in view, plus the
