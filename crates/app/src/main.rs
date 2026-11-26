@@ -181,6 +181,10 @@ impl Root {
                     cx.defer_in(window, move |this, window, cx| this.play(next, window, cx));
                 }
                 PlayerEvent::Close => {
+                    // Fullscreen is for watching; the library goes back to a normal window.
+                    if window.is_fullscreen() {
+                        window.toggle_fullscreen();
+                    }
                     let volume = player.read(cx).volume();
                     this.player = None;
                     this.library.update(cx, |lib, cx| {

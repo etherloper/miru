@@ -569,7 +569,12 @@ impl PlayerView {
         }
     }
 
-    fn on_key(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
+    fn toggle_fullscreen(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        window.toggle_fullscreen();
+        self.poke(cx);
+    }
+
+    fn on_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let k = &event.keystroke;
         if self.menu_key(k.key.as_str(), k.modifiers.shift, cx) {
             cx.stop_propagation();
@@ -586,6 +591,9 @@ impl PlayerView {
                 self.run(|p| p.seek_relative(step), cx)
             }
             "home" => self.run(|p| p.seek_absolute(0.0), cx),
+            "f" => self.toggle_fullscreen(window, cx),
+            // Esc leaves fullscreen first; a second press leaves the player.
+            "escape" if window.is_fullscreen() => self.toggle_fullscreen(window, cx),
             "escape" | "backspace" => self.close(cx),
             _ => {}
         }
@@ -657,7 +665,7 @@ impl PlayerView {
         self.run(|p| p.seek_absolute(target), cx);
     }
 
-    fn render_top_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_top_bar(&self, fullscreen: bool, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .absolute()
             .top_0()
@@ -678,21 +686,24 @@ impl PlayerView {
                     .flex()
                     .items_center()
                     .gap_4()
-                    .child(glass_round_button(
+                    .child(own_press(glass_round_button(
                         "close",
                         "icons/chevron-left.svg",
                         44.,
                         false,
                         cx.listener(|this, _, _, cx| this.close(cx)),
-                    )),
+                    ))),
             )
-            .child(
-                div()
-                    .flex_1()
-                    .h(px(72.))
-                    .window_control_area(WindowControlArea::Drag),
-            )
-            .child(theme::window_controls())
+            // Fullscreen has no window to drag or minimise, so no title bar either.
+            .when(!fullscreen, |d| {
+                d.child(
+                    div()
+                        .flex_1()
+                        .h(px(72.))
+                        .window_control_area(WindowControlArea::Drag),
+                )
+                .child(theme::window_controls())
+            })
     }
 
     fn render_transport(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -705,13 +716,13 @@ impl PlayerView {
             |id: &'static str, icon_path: &'static str, step: f64, cx: &mut Context<Self>| {
                 div()
                     .relative()
-                    .child(glass_round_button(
+                    .child(own_press(glass_round_button(
                         id,
                         icon_path,
                         64.,
                         false,
                         cx.listener(move |this, _, _, cx| this.run(|p| p.seek_relative(step), cx)),
-                    ))
+                    )))
                     .child(
                         div()
                             .absolute()
@@ -733,13 +744,13 @@ impl PlayerView {
             .justify_center()
             .gap_10()
             .child(skip("rewind", "icons/skip-back.svg", -self.seek_step, cx))
-            .child(glass_round_button(
+            .child(own_press(glass_round_button(
                 play_id,
                 play_icon,
                 92.,
                 false,
                 cx.listener(|this, _, _, cx| this.run(Player::toggle_pause, cx)),
-            ))
+            )))
             .child(skip(
                 "forward",
                 "icons/skip-forward.svg",
@@ -884,6 +895,7 @@ impl PlayerView {
         // A tall transparent hit area around a thin visible track.
         div()
             .id("seek")
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .relative()
             .w_full()
             .h(px(22.))
@@ -1192,6 +1204,7 @@ impl PlayerView {
             .child(
                 div()
                     .id("mute")
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .tab_index(0)
                     .focus_visible(theme::focus_ring)
                     .relative()
@@ -1292,7 +1305,12 @@ impl PlayerView {
         )
     }
 
-    fn render_bottom_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_bottom_bar(&self, fullscreen: bool, cx: &mut Context<Self>) -> impl IntoElement {
+        let (fullscreen_icon, fullscreen_id) = if fullscreen {
+            ("icons/fullscreen-exit.svg", "exit-fullscreen")
+        } else {
+            ("icons/fullscreen.svg", "fullscreen")
+        };
         let chapter_name: Option<String> = self
             .current_chapter
             .and_then(|i| self.chapters.get(i))
@@ -1350,13 +1368,20 @@ impl PlayerView {
                     )
                     .child(self.render_volume(cx))
                     // Audio, subtitles and chapters, in one menu.
-                    .child(glass_round_button(
+                    .child(own_press(glass_round_button(
                         "player-menu",
                         "icons/settings.svg",
                         44.,
                         self.menu.is_some(),
                         cx.listener(|this, _, _, cx| this.toggle_menu(cx)),
-                    )),
+                    )))
+                    .child(own_press(glass_round_button(
+                        fullscreen_id,
+                        fullscreen_icon,
+                        44.,
+                        false,
+                        cx.listener(|this, _, window, cx| this.toggle_fullscreen(window, cx)),
+                    ))),
             )
             .child(self.render_seek_bar(cx))
             .child(
@@ -1400,6 +1425,7 @@ impl Render for PlayerView {
         }
         let fading_out = !visible
             && self.controls_changed.elapsed() < Duration::from_millis(self.controls_fade_ms + 40);
+        let fullscreen = window.is_fullscreen();
 
         // No background: the transparent scene lets mpv's child window show through.
         let mut root = div()
@@ -1426,6 +1452,19 @@ impl Render for PlayerView {
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(|this, _, _, cx| this.run(Player::toggle_pause, cx)),
+            )
+            // Double-clicking the picture toggles fullscreen. Painted first, so the controls
+            // sit above it, and they keep their presses from reaching it (see `own_press`).
+            .child(
+                div()
+                    .id("video-surface")
+                    .absolute()
+                    .inset_0()
+                    .on_click(cx.listener(|this, event: &ClickEvent, window, cx| {
+                        if event.standard_click() && event.click_count() == 2 {
+                            this.toggle_fullscreen(window, cx);
+                        }
+                    })),
             );
 
         // Until mpv shows its first frame the transparent scene would reveal whatever is behind
@@ -1458,8 +1497,8 @@ impl Render for PlayerView {
                 .inset_0()
                 .bg(rgba(0x00000040))
                 .child(self.render_transport(cx))
-                .child(self.render_top_bar(cx))
-                .child(self.render_bottom_bar(cx));
+                .child(self.render_top_bar(fullscreen, cx))
+                .child(self.render_bottom_bar(fullscreen, cx));
             // With a menu open, a click anywhere else just closes it (like a popover), rather
             // than also pressing whatever is underneath.
             if self.menu.is_some() {
@@ -1514,6 +1553,13 @@ impl Render for PlayerView {
         }
         root
     }
+}
+
+/// Keeps a press on a control from reaching the picture underneath, where a double-click
+/// toggles fullscreen (two quick presses of play would otherwise do that too). GPUI runs an
+/// element's click handling before its mouse-down listeners, so the button still gets its click.
+fn own_press<E: InteractiveElement>(element: E) -> E {
+    element.on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
 }
 
 impl Drop for PlayerView {
