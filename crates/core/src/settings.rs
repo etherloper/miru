@@ -3,6 +3,7 @@
 use rusqlite::{OptionalExtension, params};
 
 use crate::db::{Db, LibraryRoot, Result};
+use crate::ratings::rating_site;
 
 /// How multichannel audio reaches the output device.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -96,9 +97,12 @@ pub enum LibrarySort {
     Oldest,
     /// Highest TMDB audience rating first.
     TopRated,
+    /// Highest rating on one outside site first (an id from `RATING_SITES`).
+    Site(&'static str),
 }
 
 impl LibrarySort {
+    /// The orders in the Sort menu; site orders are picked from the Rating menu.
     pub const ALL: [Self; 5] = [
         Self::Title,
         Self::RecentlyAdded,
@@ -114,21 +118,26 @@ impl LibrarySort {
             Self::Newest => "Newest",
             Self::Oldest => "Oldest",
             Self::TopRated => "Top Rated",
+            Self::Site(id) => rating_site(id).map_or(id, |site| site.name),
         }
     }
 
-    fn as_str(self) -> &'static str {
+    fn stored(self) -> String {
         match self {
-            Self::Title => "title",
-            Self::RecentlyAdded => "recent",
-            Self::Newest => "newest",
-            Self::Oldest => "oldest",
-            Self::TopRated => "rating",
+            Self::Title => "title".into(),
+            Self::RecentlyAdded => "recent".into(),
+            Self::Newest => "newest".into(),
+            Self::Oldest => "oldest".into(),
+            Self::TopRated => "rating".into(),
+            Self::Site(id) => format!("site:{id}"),
         }
     }
 
     fn parse(s: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|v| v.as_str() == s)
+        if let Some(id) = s.strip_prefix("site:") {
+            return rating_site(id).map(|site| Self::Site(site.id));
+        }
+        Self::ALL.into_iter().find(|v| v.stored() == s)
     }
 }
 
@@ -389,8 +398,8 @@ impl Db {
             ),
             (AUTOPLAY, s.autoplay_next.to_string()),
             (SIDEBAR, s.sidebar_collapsed.to_string()),
-            (MOVIE_SORT, s.movie_sort.as_str().to_string()),
-            (SHOW_SORT, s.show_sort.as_str().to_string()),
+            (MOVIE_SORT, s.movie_sort.stored()),
+            (SHOW_SORT, s.show_sort.stored()),
             (VOLUME, s.volume.to_string()),
             (TMDB_KEY, s.tmdb_key.clone().unwrap_or_default()),
             (MDBLIST_KEY, s.mdblist_key.clone().unwrap_or_default()),
@@ -604,5 +613,14 @@ mod sort_tests {
         assert_eq!(title_sort_key("An Education"), "education");
         assert_eq!(title_sort_key("Theodore"), "theodore");
         assert_eq!(title_sort_key("The"), "the");
+    }
+
+    #[test]
+    fn site_sorts_round_trip_and_unknown_sites_are_dropped() {
+        let sort = LibrarySort::Site("imdb");
+        assert_eq!(LibrarySort::parse(&sort.stored()), Some(sort));
+        assert_eq!(sort.label(), "IMDb");
+        assert_eq!(LibrarySort::parse("site:nowhere"), None);
+        assert_eq!(LibrarySort::parse("rating"), Some(LibrarySort::TopRated));
     }
 }

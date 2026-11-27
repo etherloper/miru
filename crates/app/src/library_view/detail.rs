@@ -2,6 +2,12 @@
 
 use super::*;
 
+/// Widest the text column beside the artwork gets (padding included).
+const DETAIL_COLUMN_W: f32 = 780.;
+/// Widest the synopsis runs, and how many lines it shows before "Read more".
+const SYNOPSIS_W: f32 = 680.;
+const SYNOPSIS_LINES: usize = 3;
+
 impl LibraryView {
     // ---- detail pages ----------------------------------------------------------------------
 
@@ -422,49 +428,91 @@ impl LibraryView {
         }
         // "Starring" with the first few names, then a link to the full cast sheet.
         let cast_item = item.clone();
-        let starring = (!meta.cast.is_empty()).then(|| {
-            div()
-                .max_w(px(680.))
-                .flex()
-                .flex_wrap()
-                .items_center()
-                .gap_x_3()
-                .gap_y_1()
-                .text_sm()
-                .text_color(theme::text_secondary())
-                .child(format!(
-                    "Starring {}",
-                    meta.cast
-                        .iter()
-                        .take(4)
-                        .cloned()
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ))
-                .child(
-                    div()
-                        .id("view-cast")
-                        .tab_index(0)
-                        .focus_visible(theme::focus_ring)
-                        .flex()
-                        .items_center()
-                        .gap_1()
-                        .rounded(px(6.))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(theme::text())
-                        .cursor_pointer()
-                        .hover(|s| s.text_color(theme::accent()))
-                        .child("View full cast")
-                        .child(icon(
-                            "icons/chevron-right.svg",
-                            12.,
-                            theme::text_secondary(),
+        let starring =
+            (!meta.cast.is_empty()).then(|| {
+                div()
+                    .max_w(px(680.))
+                    .flex()
+                    .flex_wrap()
+                    .items_center()
+                    .gap_x_3()
+                    .gap_y_1()
+                    .text_sm()
+                    .text_color(theme::text_secondary())
+                    .child(format!(
+                        "Starring {}",
+                        meta.cast
+                            .iter()
+                            .take(4)
+                            .cloned()
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ))
+                    .child(detail_link("view-cast", "View full cast").on_click(
+                        cx.listener(move |this, _, _, cx| this.open_cast(&cast_item, cx)),
+                    ))
+            });
+
+        // The synopsis, cut to a few lines; when it runs longer, "Read more" opens the full
+        // text and details in a dialog.
+        let synopsis =
+            meta.overview.clone().map(|overview| {
+                // The width the text was laid out at last frame; until then (or if it can't be
+                // read), the column's width worked out from the window.
+                let measured = self.synopsis_width.get();
+                let width = if measured > 0. {
+                    measured
+                } else {
+                    ((f32::from(window.viewport_size().width) - self.sidebar_width())
+                        .min(DETAIL_COLUMN_W)
+                        - PAGE_PADDING * 2.)
+                        .min(SYNOPSIS_W)
+                };
+                let long = text_lines(&overview, width, window) > SYNOPSIS_LINES;
+                let details_item = item.clone();
+                let details_facts = line.join("  ·  ");
+                let width_slot = self.synopsis_width.clone();
+                let view = cx.entity_id();
+                div()
+                    .relative()
+                    .max_w(px(SYNOPSIS_W))
+                    .flex()
+                    .flex_col()
+                    .items_start()
+                    .gap_1()
+                    // Records the laid-out width, and redraws if it changed, so the next frame
+                    // decides "Read more" from the real width.
+                    .child(
+                        gpui::canvas(
+                            move |bounds, _, cx| {
+                                let width = f32::from(bounds.size.width);
+                                if (width_slot.get() - width).abs() > 0.5 {
+                                    width_slot.set(width);
+                                    cx.notify(view);
+                                }
+                            },
+                            |_, _, _, _| {},
+                        )
+                        .absolute()
+                        .inset_0(),
+                    )
+                    .child(
+                        div()
+                            .text_color(rgba(0xe8e8edff))
+                            .line_height(px(24.))
+                            .line_clamp(SYNOPSIS_LINES)
+                            // Ends the last line with "…" rather than cutting a word in half.
+                            .text_ellipsis()
+                            .child(overview),
+                    )
+                    .when(long, |d| {
+                        d.child(detail_link("read-more", "Read more").text_sm().on_click(
+                            cx.listener(move |this, _, _, cx| {
+                                this.open_details(details_item.clone(), details_facts.clone(), cx)
+                            }),
                         ))
-                        .on_click(
-                            cx.listener(move |this, _, _, cx| this.open_cast(&cast_item, cx)),
-                        ),
-                )
-        });
+                    })
+            });
 
         div()
             .relative()
@@ -524,7 +572,7 @@ impl LibraryView {
                     } else {
                         150.
                     }))
-                    .max_w(px(780.))
+                    .max_w(px(DETAIL_COLUMN_W))
                     .flex()
                     .flex_col()
                     .gap_3()
@@ -562,13 +610,7 @@ impl LibraryView {
                                 .children(rating),
                         )
                     })
-                    .children(meta.overview.clone().map(|o| {
-                        div()
-                            .max_w(px(680.))
-                            .text_color(rgba(0xe8e8edff))
-                            .line_height(px(24.))
-                            .child(o)
-                    }))
+                    .children(synopsis)
                     .children(starring)
                     .children(extra)
                     .child(div().mt_3().flex().items_center().gap_3().children(actions)),
@@ -679,5 +721,53 @@ pub(super) fn hero_art(item: &LibraryItem) -> AnyElement {
             .inset_0()
             .bg(theme::placeholder(&item.key.title, meta.accent_rgb))
             .into_any_element(),
+    }
+}
+
+/// A small text link ("View full cast", "Read more"): bold, with a chevron, accent on hover.
+fn detail_link(id: &'static str, label: &'static str) -> gpui::Stateful<Div> {
+    div()
+        .id(id)
+        .tab_index(0)
+        .focus_visible(theme::focus_ring)
+        .flex()
+        .items_center()
+        .gap_1()
+        .rounded(px(6.))
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(theme::text())
+        .cursor_pointer()
+        .hover(|s| s.text_color(theme::accent()))
+        .child(label)
+        .child(icon(
+            "icons/chevron-right.svg",
+            12.,
+            theme::text_secondary(),
+        ))
+}
+
+/// How many lines `text` wraps to at `width` in the window's body text style. Falls back to a
+/// rough count by length if shaping fails.
+fn text_lines(text: &str, width: f32, window: &Window) -> usize {
+    // The body font is set on the root element, which isn't in effect while a view renders.
+    let mut style = window.text_style();
+    style.font_family = theme::FONT.into();
+    let font_size = style.font_size.to_pixels(window.rem_size());
+    let shaped = window.text_system().shape_text(
+        text.to_string().into(),
+        font_size,
+        &[style.to_run(text.len())],
+        Some(px(width)),
+        None,
+    );
+    match shaped {
+        Ok(lines) => lines
+            .iter()
+            .map(|line| line.wrap_boundaries().len() + 1)
+            .sum(),
+        Err(e) => {
+            tracing::warn!("measuring synopsis: {e}");
+            text.chars().count() / 80 + 1
+        }
     }
 }

@@ -1,7 +1,8 @@
 //! Movies and TV Shows grids with their sort and genre controls.
 
 use super::*;
-use crate::genres::{Length, MIN_RATINGS};
+use crate::genres::{Length, MIN_RATINGS, WatchedFilter};
+use miru_core::ratings::{RATING_SITES, RatingSite};
 
 impl LibraryView {
     // ---- grids -----------------------------------------------------------------------------
@@ -32,7 +33,7 @@ impl LibraryView {
                     .child(format!("{count} titles")),
             )
             .child(div().flex_1())
-            .child(self.unwatched_toggle(tab, cx))
+            .child(self.watched_dropdown(tab, cx))
             .child(self.genre_dropdown(tab, cx))
             .child(self.rating_dropdown(tab, cx))
             .child(self.length_dropdown(tab, cx))
@@ -134,10 +135,10 @@ impl LibraryView {
             .update(&self.shows, |i| shows.contains(&i.key.title.to_lowercase()));
     }
 
-    fn set_unwatched(&mut self, tab: Tab, on: bool, cx: &mut Context<Self>) {
+    fn set_watched_filter(&mut self, tab: Tab, value: WatchedFilter, cx: &mut Context<Self>) {
         match tab {
-            Tab::Movies => self.movie_filter.unwatched_only = on,
-            Tab::Shows => self.show_filter.unwatched_only = on,
+            Tab::Movies => self.movie_filter.watched = value,
+            Tab::Shows => self.show_filter.watched = value,
             Tab::Home | Tab::Search => return,
         }
         self.apply_filters();
@@ -170,6 +171,7 @@ impl LibraryView {
             cx,
         );
         self.reload();
+        self.fill_sort_ratings(cx);
     }
 
     pub(super) fn close_genre_menu(&mut self) {
@@ -178,26 +180,27 @@ impl LibraryView {
         }
     }
 
-    /// "All titles" / "Unwatched": a dropdown, white while it filters.
-    fn unwatched_toggle(&self, tab: Tab, cx: &mut Context<Self>) -> AnyElement {
+    /// "All titles" / "Unwatched" / "Watched": a dropdown, white while it filters.
+    fn watched_dropdown(&self, tab: Tab, cx: &mut Context<Self>) -> AnyElement {
         let Some(filter) = self.genre_filter(tab) else {
             return theme::nothing();
         };
-        let on = filter.unwatched_only;
-        let options = [(false, "All titles"), (true, "Unwatched")];
-        let rows = options
+        let current = filter.watched;
+        let rows = WatchedFilter::ALL
             .into_iter()
-            .map(|(value, label)| GridOption {
-                label: label.into(),
+            .map(|value| GridOption {
+                label: value.label().into(),
                 count: None,
-                selected: value == on,
+                heading: None,
+                selected: value == current,
                 action: Rc::new(move |this: &mut Self, cx: &mut Context<Self>| {
-                    this.set_unwatched(tab, value, cx)
+                    this.set_watched_filter(tab, value, cx)
                 }),
             })
             .collect();
-        let label = if on { "Unwatched" } else { "All titles" };
-        self.grid_dropdown(tab, GridMenu::Watched, label.into(), on, rows, 180., cx)
+        let active = current != WatchedFilter::Any;
+        let label = current.label().into();
+        self.grid_dropdown(tab, GridMenu::Watched, label, active, rows, 180., cx)
     }
 
     /// Genre picker: a dropdown naming the current genre, listing "All genres" and each genre
@@ -212,6 +215,7 @@ impl LibraryView {
         let mut rows = vec![GridOption {
             label: "All genres".into(),
             count: None,
+            heading: None,
             selected: filter.selected.is_none(),
             action: Rc::new(move |this: &mut Self, cx: &mut Context<Self>| {
                 this.select_genre(tab, None, cx)
@@ -222,6 +226,7 @@ impl LibraryView {
             GridOption {
                 label: name.clone().into(),
                 count: Some(*n),
+                heading: None,
                 selected: filter.selected.as_deref() == Some(name.as_str()),
                 action: Rc::new(move |this: &mut Self, cx: &mut Context<Self>| {
                     this.select_genre(tab, Some(genre.clone()), cx)
@@ -263,7 +268,8 @@ impl LibraryView {
         cx.notify();
     }
 
-    /// Minimum TMDB rating: Any, 6+, 7+ or 8+.
+    /// Minimum TMDB rating (Any, 6+, 7+ or 8+), then, with an MDBList key, a sort by each
+    /// rating site chosen in Settings.
     fn rating_dropdown(&self, tab: Tab, cx: &mut Context<Self>) -> AnyElement {
         let Some(filter) = self.genre_filter(tab) else {
             return theme::nothing();
@@ -273,24 +279,51 @@ impl LibraryView {
             Some(min) => format!("Rated {}+", min / 10),
             None => "Any rating".to_string(),
         };
-        let rows = std::iter::once(None)
+        let sort = match tab {
+            Tab::Movies => self.settings.movie_sort,
+            _ => self.settings.show_sort,
+        };
+        let sites: Vec<&'static RatingSite> = if self.settings.mdblist_key.is_some() {
+            RATING_SITES
+                .iter()
+                .filter(|site| self.settings.rating_sources.iter().any(|s| s == site.id))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let mut rows: Vec<GridOption> = std::iter::once(None)
             .chain(MIN_RATINGS.into_iter().map(Some))
-            .map(|min| GridOption {
+            .enumerate()
+            .map(|(ix, min)| GridOption {
                 label: label(min).into(),
                 count: None,
+                heading: (ix == 0 && !sites.is_empty()).then(|| "Minimum rating".into()),
                 selected: min == current,
                 action: Rc::new(move |this: &mut Self, cx: &mut Context<Self>| {
                     this.change_filter(tab, |f| f.min_rating = min, cx)
                 }),
             })
             .collect();
+        rows.extend(sites.iter().enumerate().map(|(ix, site)| {
+            let site_sort = LibrarySort::Site(site.id);
+            GridOption {
+                label: site.name.into(),
+                count: None,
+                heading: (ix == 0).then(|| "Sort by rating".into()),
+                selected: sort == site_sort,
+                action: Rc::new(move |this: &mut Self, cx: &mut Context<Self>| {
+                    this.set_sort(tab, site_sort, cx)
+                }),
+            }
+        }));
+        let width = if sites.is_empty() { 180. } else { 240. };
         self.grid_dropdown(
             tab,
             GridMenu::Rating,
             label(current).into(),
             current.is_some(),
             rows,
-            180.,
+            width,
             cx,
         )
     }
@@ -309,6 +342,7 @@ impl LibraryView {
             .map(|length| GridOption {
                 label: length.label().into(),
                 count: None,
+                heading: None,
                 selected: length == current,
                 action: Rc::new(move |this: &mut Self, cx: &mut Context<Self>| {
                     this.change_filter(tab, |f| f.length = length, cx)
@@ -339,6 +373,7 @@ impl LibraryView {
             .map(|sort| GridOption {
                 label: sort.label().into(),
                 count: None,
+                heading: None,
                 selected: sort == current,
                 action: Rc::new(move |this: &mut Self, cx: &mut Context<Self>| {
                     this.set_sort(tab, sort, cx)
@@ -414,9 +449,9 @@ impl LibraryView {
             }));
 
         let menu = open.then(|| {
-            let rows = options.into_iter().enumerate().map(|(ix, option)| {
+            let rows = options.into_iter().enumerate().flat_map(|(ix, option)| {
                 let action = option.action.clone();
-                div()
+                let row = div()
                     .id(("grid-option", ix))
                     .h(px(theme::MENU_ROW_H))
                     .px_3()
@@ -447,7 +482,22 @@ impl LibraryView {
                             .text_color(theme::text_tertiary())
                             .child(n.to_string())
                     }))
-                    .on_click(cx.listener(move |this, _, _, cx| action(this, cx)))
+                    .on_click(cx.listener(move |this, _, _, cx| action(this, cx)));
+                let heading = option.heading.map(|heading| {
+                    div()
+                        .px_3()
+                        .pt(px(if ix == 0 { 6. } else { 14. }))
+                        .pb_1()
+                        .flex_shrink_0()
+                        .text_xs()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(theme::text_tertiary())
+                        .child(heading)
+                });
+                heading
+                    .into_iter()
+                    .map(IntoElement::into_any_element)
+                    .chain(std::iter::once(row.into_any_element()))
             });
             let list = theme::menu_surface(div().id("grid-menu"))
                 .occlude()
@@ -502,6 +552,8 @@ type GridAction = Rc<dyn Fn(&mut LibraryView, &mut Context<LibraryView>)>;
 struct GridOption {
     label: SharedString,
     count: Option<usize>,
+    /// A section title drawn above this option.
+    heading: Option<SharedString>,
     selected: bool,
     action: GridAction,
 }
@@ -509,7 +561,11 @@ struct GridOption {
 impl LibraryView {}
 
 /// Orders a library grid. Title order ignores leading articles ("The Matrix" under M).
-pub(super) fn sort_items(items: &mut [LibraryItem], sort: LibrarySort) {
+pub(super) fn sort_items(
+    items: &mut [LibraryItem],
+    sort: LibrarySort,
+    ratings: &HashMap<TitleKey, miru_core::ratings::TitleRatings>,
+) {
     match sort {
         LibrarySort::Title => items.sort_by_cached_key(|i| title_sort_key(i.display_title())),
         LibrarySort::RecentlyAdded => items.sort_by_key(|i| std::cmp::Reverse(i.added_at)),
@@ -532,6 +588,18 @@ pub(super) fn sort_items(items: &mut [LibraryItem], sort: LibrarySort) {
             (
                 rating.is_none(),
                 std::cmp::Reverse(rating),
+                title_sort_key(i.display_title()),
+            )
+        }),
+        // Titles the site hasn't rated (or whose ratings aren't fetched yet) go last.
+        LibrarySort::Site(site) => items.sort_by_cached_key(|i| {
+            let score = ratings
+                .get(&i.key)
+                .and_then(|r| r.get(site))
+                .and_then(|r| r.score);
+            (
+                score.is_none(),
+                std::cmp::Reverse(score),
                 title_sort_key(i.display_title()),
             )
         }),

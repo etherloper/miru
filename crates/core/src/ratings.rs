@@ -1,13 +1,71 @@
 //! Outside ratings for a title (IMDb, Rotten Tomatoes, Metacritic, Letterboxd…), fetched from
 //! MDBList and cached so detail pages show them straight away.
 
+use std::collections::HashMap;
+
 use rusqlite::{OptionalExtension, params};
 
 use crate::db::{Db, Result};
-use crate::library::TitleKey;
+use crate::library::{ItemKind, TitleKey};
 
 /// Ratings are fetched again after this long.
 pub const RATINGS_MAX_AGE_SECS: i64 = 7 * 24 * 60 * 60;
+
+/// A site MDBList reports ratings from.
+pub struct RatingSite {
+    /// MDBList's name for it.
+    pub id: &'static str,
+    pub name: &'static str,
+}
+
+/// Every site MDBList reports, in the order their badges appear.
+pub const RATING_SITES: [RatingSite; 10] = [
+    RatingSite {
+        id: "imdb",
+        name: "IMDb",
+    },
+    RatingSite {
+        id: "tomatoes",
+        name: "Rotten Tomatoes",
+    },
+    RatingSite {
+        id: "popcorn",
+        name: "Rotten Tomatoes audience",
+    },
+    RatingSite {
+        id: "metacritic",
+        name: "Metacritic",
+    },
+    RatingSite {
+        id: "metacriticuser",
+        name: "Metacritic users",
+    },
+    RatingSite {
+        id: "letterboxd",
+        name: "Letterboxd",
+    },
+    RatingSite {
+        id: "trakt",
+        name: "Trakt",
+    },
+    RatingSite {
+        id: "tmdb",
+        name: "TMDB",
+    },
+    RatingSite {
+        id: "rogerebert",
+        name: "Roger Ebert",
+    },
+    RatingSite {
+        id: "myanimelist",
+        name: "MyAnimeList",
+    },
+];
+
+/// The site with MDBList name `id`.
+pub fn rating_site(id: &str) -> Option<&'static RatingSite> {
+    RATING_SITES.iter().find(|site| site.id == id)
+}
 
 /// One site's rating of a title.
 #[derive(Debug, Clone, PartialEq)]
@@ -69,6 +127,64 @@ impl Db {
         }))
     }
 
+    /// Every title's cached ratings, for sorting the library by a site's rating.
+    pub fn all_title_ratings(&self) -> Result<HashMap<TitleKey, TitleRatings>> {
+        let key = |kind: String, title: String, year: u16| {
+            let kind = match kind.as_str() {
+                "movie" => ItemKind::Movie,
+                "show" => ItemKind::Show,
+                _ => return None,
+            };
+            Some(TitleKey {
+                kind,
+                title,
+                year: (year != 0).then_some(year),
+            })
+        };
+        let mut all = HashMap::new();
+        let mut stmt = self
+            .conn
+            .prepare("SELECT kind, title, year, fetched_at FROM rating_fetches")?;
+        let fetches = stmt.query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+        })?;
+        for fetch in fetches {
+            let (kind, title, year, fetched_at) = fetch?;
+            if let Some(k) = key(kind, title, year) {
+                all.insert(
+                    k,
+                    TitleRatings {
+                        ratings: Vec::new(),
+                        fetched_at,
+                    },
+                );
+            }
+        }
+        let mut stmt = self
+            .conn
+            .prepare("SELECT kind, title, year, source, value, score, votes FROM title_scores")?;
+        let scores = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get(1)?,
+                r.get(2)?,
+                SourceRating {
+                    source: r.get(3)?,
+                    value: r.get(4)?,
+                    score: r.get(5)?,
+                    votes: r.get(6)?,
+                },
+            ))
+        })?;
+        for score in scores {
+            let (kind, title, year, rating) = score?;
+            if let Some(entry) = key(kind, title, year).and_then(|k| all.get_mut(&k)) {
+                entry.ratings.push(rating);
+            }
+        }
+        Ok(all)
+    }
+
     pub fn save_title_ratings(&self, key: &TitleKey, ratings: &TitleRatings) -> Result<()> {
         let k = (key.kind.as_str(), &key.title, key.year.unwrap_or(0));
         self.conn.execute(
@@ -94,7 +210,6 @@ impl Db {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::library::ItemKind;
 
     #[test]
     fn ratings_round_trip() {
@@ -125,6 +240,12 @@ mod tests {
         db.save_title_ratings(&key, &ratings).unwrap();
         let back = db.title_ratings(&key).unwrap().unwrap();
         assert_eq!(back.fetched_at, 10);
+        let all = db.all_title_ratings().unwrap();
+        assert_eq!(
+            all.get(&key),
+            Some(&back),
+            "the bulk load matches the single one"
+        );
         assert_eq!(back.get("imdb").and_then(|r| r.value), Some(8.3));
         assert_eq!(back.get("tomatoes").and_then(|r| r.score), Some(88));
 

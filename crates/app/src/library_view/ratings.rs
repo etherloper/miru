@@ -2,60 +2,10 @@
 //! sites exist and how each one's badge looks, fetching and caching, and the Settings rows
 //! for choosing which sites to show.
 
-use miru_core::ratings::{RATINGS_MAX_AGE_SECS, SourceRating, TitleRatings};
+use miru_core::ratings::{RATING_SITES, RATINGS_MAX_AGE_SECS, SourceRating, TitleRatings};
 use miru_metadata::Mdblist;
 
 use super::*;
-
-/// A site MDBList reports ratings from, in the order the badges appear.
-pub(super) struct RatingSite {
-    /// MDBList's name for it.
-    pub id: &'static str,
-    pub name: &'static str,
-}
-
-pub(super) const RATING_SITES: [RatingSite; 10] = [
-    RatingSite {
-        id: "imdb",
-        name: "IMDb",
-    },
-    RatingSite {
-        id: "tomatoes",
-        name: "Rotten Tomatoes",
-    },
-    RatingSite {
-        id: "popcorn",
-        name: "Rotten Tomatoes audience",
-    },
-    RatingSite {
-        id: "metacritic",
-        name: "Metacritic",
-    },
-    RatingSite {
-        id: "metacriticuser",
-        name: "Metacritic users",
-    },
-    RatingSite {
-        id: "letterboxd",
-        name: "Letterboxd",
-    },
-    RatingSite {
-        id: "trakt",
-        name: "Trakt",
-    },
-    RatingSite {
-        id: "tmdb",
-        name: "TMDB",
-    },
-    RatingSite {
-        id: "rogerebert",
-        name: "Roger Ebert",
-    },
-    RatingSite {
-        id: "myanimelist",
-        name: "MyAnimeList",
-    },
-];
 
 impl LibraryView {
     /// Shows a title's cached ratings and, with an MDBList key, fetches them if they're missing
@@ -106,6 +56,103 @@ impl LibraryView {
             .ok();
         })
         .detach();
+    }
+
+    /// While a grid sorts by a site's rating, fetches ratings for its titles that never had
+    /// them (most are only fetched when their page opens), one at a time, re-sorting as they
+    /// arrive. Stops at the first error, such as MDBList's daily limit; the rest are tried on
+    /// the next launch or library sync.
+    pub(super) fn fill_sort_ratings(&mut self, cx: &mut Context<Self>) {
+        if self.ratings_filling {
+            return;
+        }
+        let Some(api_key) = self.settings.mdblist_key.clone() else {
+            return;
+        };
+        let mut wanted: Vec<(TitleKey, i64)> = Vec::new();
+        for (sort, items) in [
+            (self.settings.movie_sort, &self.movies),
+            (self.settings.show_sort, &self.shows),
+        ] {
+            if !matches!(sort, LibrarySort::Site(_)) {
+                continue;
+            }
+            wanted.extend(
+                items
+                    .iter()
+                    .filter(|i| {
+                        !self.ratings.contains_key(&i.key) && !self.ratings_pending.contains(&i.key)
+                    })
+                    .filter_map(|i| Some((i.key.clone(), i.metadata.as_ref()?.tmdb_id?))),
+            );
+        }
+        if wanted.is_empty() {
+            return;
+        }
+        self.ratings_filling = true;
+        let keys: Vec<TitleKey> = wanted.iter().map(|(key, _)| key.clone()).collect();
+        self.ratings_pending.extend(keys.iter().cloned());
+        let client = Mdblist::new(&api_key);
+        cx.spawn(async move |this, cx| {
+            let total = wanted.len();
+            for (n, (key, tmdb_id)) in wanted.into_iter().enumerate() {
+                let kind = key.kind;
+                let mdblist = client.clone();
+                let found = cx
+                    .background_executor()
+                    .spawn(async move { mdblist.ratings_by_tmdb(kind, tmdb_id) })
+                    .await;
+                let keep_going = this
+                    .update(cx, |view, cx| {
+                        view.ratings_pending.remove(&key);
+                        let found = match found {
+                            Ok(found) => found,
+                            Err(e) => {
+                                tracing::warn!("fetching ratings for sorting: {e}");
+                                return false;
+                            }
+                        };
+                        let ratings = TitleRatings {
+                            ratings: found.unwrap_or_default(),
+                            fetched_at: unix_secs(),
+                        };
+                        if let Err(e) = view.db.save_title_ratings(&key, &ratings) {
+                            tracing::warn!("saving ratings: {e}");
+                        }
+                        view.ratings.insert(key, ratings);
+                        // In batches, so the grid doesn't reshuffle with every title.
+                        if (n + 1) % 10 == 0 || n + 1 == total {
+                            view.resort(cx);
+                        }
+                        true
+                    })
+                    .unwrap_or(false);
+                if !keep_going {
+                    break;
+                }
+            }
+            this.update(cx, |view, cx| {
+                view.ratings_filling = false;
+                for key in &keys {
+                    view.ratings_pending.remove(key);
+                }
+                view.resort(cx);
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Re-sorts both grids by their current order, e.g. as ratings arrive.
+    fn resort(&mut self, cx: &mut Context<Self>) {
+        let mut movies = (*self.movies).clone();
+        sort_items(&mut movies, self.settings.movie_sort, &self.ratings);
+        self.movies = Rc::new(movies);
+        let mut shows = (*self.shows).clone();
+        sort_items(&mut shows, self.settings.show_sort, &self.ratings);
+        self.shows = Rc::new(shows);
+        self.apply_filters();
+        cx.notify();
     }
 
     /// After the MDBList key changes: fetch ratings afresh for the page that's open.

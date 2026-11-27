@@ -25,13 +25,11 @@ pub enum ScrollbarSize {
     Compact,
 }
 
-/// Measurements of one size: gap from the right edge, thumb width at rest and while hovered
-/// or dragged, the width of the strip that responds to the pointer, and the shortest thumb.
+/// Measurements of one size: gap from the right edge, thumb width, the width of the strip that responds to the pointer, and the shortest thumb.
 #[derive(Clone, Copy)]
 struct Metrics {
     edge: f32,
     width: f32,
-    width_active: f32,
     hit_width: f32,
     min_thumb: f32,
 }
@@ -40,16 +38,15 @@ impl ScrollbarSize {
     fn metrics(self) -> Metrics {
         match self {
             Self::Regular => Metrics {
-                edge: 4.,
-                width: 6.,
-                width_active: 10.,
-                hit_width: 16.,
+                edge: 3.,
+                width: 7.,
+                // Wider than the thumb, so it stays easy to grab.
+                hit_width: 14.,
                 min_thumb: 36.,
             },
             Self::Compact => Metrics {
                 edge: 3.,
-                width: 3.,
-                width_active: 5.,
+                width: 4.,
                 hit_width: 10.,
                 min_thumb: 24.,
             },
@@ -83,7 +80,10 @@ pub struct ScrollArea {
 
 impl ScrollArea {
     pub fn scrollbar(&self, view: EntityId) -> Scrollbar {
-        Scrollbar::new(self.handle.clone(), self.drag.clone(), 0., view)
+        Scrollbar {
+            inside: true,
+            ..Scrollbar::new(self.handle.clone(), self.drag.clone(), 0., view)
+        }
     }
 
     /// A thin scrollbar for a small menu. Leave [`ScrollbarSize::gutter`] free at the right of
@@ -113,6 +113,9 @@ pub struct Scrollbar {
     /// The view to re-render when the scrollbar moves the page.
     view: EntityId,
     size: ScrollbarSize,
+    /// A child of the scroll container itself (moving with its content), rather than an
+    /// overlay on a still parent.
+    inside: bool,
 }
 
 impl Scrollbar {
@@ -124,6 +127,7 @@ impl Scrollbar {
             top_inset,
             view,
             size: ScrollbarSize::Regular,
+            inside: false,
         }
     }
 }
@@ -142,7 +146,7 @@ struct Geometry {
 impl Geometry {
     fn measure(
         handle: &ScrollHandle,
-        area: Bounds<Pixels>,
+        area: Option<Bounds<Pixels>>,
         top_inset: f32,
         metrics: Metrics,
     ) -> Option<Self> {
@@ -152,7 +156,10 @@ impl Geometry {
         if max < 1. || view_h < 1. {
             return None;
         }
-        let track_top = f32::from(view.top()).max(f32::from(area.top()) + top_inset) + PAD;
+        // An overlay keeps its track below whatever covers the top of its parent (the nav
+        // bar). Inside a scroll container `area` would move with the content, so there is none.
+        let floor = area.map_or(f32::NEG_INFINITY, |area| f32::from(area.top()) + top_inset);
+        let track_top = f32::from(view.top()).max(floor) + PAD;
         let track_h = f32::from(view.bottom()) - PAD - track_top;
         if track_h < metrics.min_thumb * 2. {
             return None;
@@ -223,10 +230,20 @@ impl Element for Scrollbar {
             position: gpui::Position::Absolute,
             ..Style::default()
         };
-        style.inset.top = px(0.).into();
-        style.inset.left = px(0.).into();
-        style.size.width = relative(1.).into();
-        style.size.height = relative(1.).into();
+        if self.inside {
+            // Zero-sized at its static position (the start of the content). A scroll container
+            // measures its content from its children's bounds, so a full-size child here would
+            // count the container's padding as content and make a list that fits scroll by a
+            // few pixels. The track is placed from the scroll handle instead.
+            style.size.width = px(0.).into();
+            style.size.height = px(0.).into();
+        } else {
+            // An overlay filling its still parent, which places the track under the nav bar.
+            style.inset.top = px(0.).into();
+            style.inset.left = px(0.).into();
+            style.size.width = relative(1.).into();
+            style.size.height = relative(1.).into();
+        }
         (window.request_layout(style, [], cx), ())
     }
 
@@ -239,7 +256,12 @@ impl Element for Scrollbar {
         window: &mut Window,
         _: &mut App,
     ) -> ScrollbarPrepaint {
-        let geometry = Geometry::measure(&self.handle, bounds, self.top_inset, self.size.metrics());
+        let geometry = Geometry::measure(
+            &self.handle,
+            (!self.inside).then_some(bounds),
+            self.top_inset,
+            self.size.metrics(),
+        );
         // Wheel scrolling over the strip still reaches the page underneath.
         let hitbox = geometry
             .map(|g| window.insert_hitbox(g.hit_bounds(), HitboxBehavior::BlockMouseExceptScroll));
@@ -264,11 +286,8 @@ impl Element for Scrollbar {
         let dragging = self.drag.get().is_some();
         let hovered = hitbox.is_hovered(window);
         let active = dragging || hovered;
-        let width = if active {
-            g.metrics.width_active
-        } else {
-            g.metrics.width
-        };
+        // A fixed width; hovering only brightens it.
+        let width = g.metrics.width;
         let thumb = Bounds::new(
             point(px(g.right - width), px(g.thumb_top)),
             size(px(width), px(g.thumb_h)),

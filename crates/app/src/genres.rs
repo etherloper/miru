@@ -38,22 +38,51 @@ impl Length {
     }
 }
 
+/// Which titles show by watched state.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum WatchedFilter {
+    #[default]
+    Any,
+    Unwatched,
+    Watched,
+}
+
+impl WatchedFilter {
+    pub const ALL: [Self; 3] = [Self::Any, Self::Unwatched, Self::Watched];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Any => "All titles",
+            Self::Unwatched => "Unwatched",
+            Self::Watched => "Watched",
+        }
+    }
+
+    fn keeps(self, watched: bool) -> bool {
+        match self {
+            Self::Any => true,
+            Self::Unwatched => !watched,
+            Self::Watched => watched,
+        }
+    }
+}
+
 /// Minimum ratings offered, in tenths (70 = 7.0).
 pub const MIN_RATINGS: [u16; 3] = [60, 70, 80];
 
-/// Filter state for one grid: the chosen genre, whether only unwatched titles show, the
+/// Filter state for one grid: the chosen genre, which titles show by watched state, the
 /// minimum rating and length, the genres on offer and the items shown.
 #[derive(Default)]
 pub struct GenreFilter {
     pub selected: Option<String>,
-    pub unwatched_only: bool,
+    pub watched: WatchedFilter,
     /// Minimum TMDB rating in tenths; unrated titles are hidden while it is set.
     pub min_rating: Option<u16>,
     /// Movies only; titles without a known runtime are hidden while it is set.
     pub length: Length,
     /// Genres present in the grid, most common first, with how many titles carry each.
     pub genres: Vec<(String, usize)>,
-    /// The grid's items narrowed by the genre and the unwatched switch.
+    /// The grid's items narrowed by the filters.
     pub items: Rc<Vec<LibraryItem>>,
 }
 
@@ -61,7 +90,7 @@ impl GenreFilter {
     /// Whether any filter is hiding titles.
     pub fn is_narrowed(&self) -> bool {
         self.selected.is_some()
-            || self.unwatched_only
+            || self.watched != WatchedFilter::Any
             || self.min_rating.is_some()
             || self.length != Length::Any
     }
@@ -83,7 +112,7 @@ impl GenreFilter {
             Rc::new(
                 all.iter()
                     .filter(|item| self.selected.as_deref().is_none_or(|g| has_genre(item, g)))
-                    .filter(|item| !self.unwatched_only || !watched(item))
+                    .filter(|item| self.watched.keeps(watched(item)))
                     .filter(|item| {
                         self.min_rating.is_none_or(|min| {
                             item.metadata
@@ -220,14 +249,19 @@ mod tests {
     }
 
     #[test]
-    fn unwatched_switch_hides_watched_titles() {
+    fn watched_filter_picks_by_watched_state() {
         let all = Rc::new(vec![item("A", &["Drama"]), item("B", &["Drama"])]);
         let mut filter = GenreFilter {
-            unwatched_only: true,
+            watched: WatchedFilter::Unwatched,
             ..Default::default()
         };
         filter.update(&all, |i| i.key.title == "A");
         let titles: Vec<_> = filter.items.iter().map(|i| i.key.title.as_str()).collect();
         assert_eq!(titles, ["B"]);
+
+        filter.watched = WatchedFilter::Watched;
+        filter.update(&all, |i| i.key.title == "A");
+        let titles: Vec<_> = filter.items.iter().map(|i| i.key.title.as_str()).collect();
+        assert_eq!(titles, ["A"]);
     }
 }

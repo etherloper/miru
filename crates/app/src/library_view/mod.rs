@@ -37,6 +37,7 @@ mod cards;
 mod cast;
 mod collections;
 mod detail;
+mod details_modal;
 mod fix_match;
 mod grid;
 mod hero;
@@ -321,6 +322,12 @@ pub struct LibraryView {
     /// Full cast sheet, and an epoch per opening (for its entrance).
     cast_pane: Option<cast::CastPane>,
     cast_epoch: usize,
+    /// "Read more" on a detail page: the full synopsis and details.
+    details_modal: Option<details_modal::DetailsModal>,
+    details_scroll: ScrollArea,
+    /// The detail page synopsis's laid-out width, measured as it paints, so "Read more"
+    /// only shows when the text really runs past its lines.
+    synopsis_width: Rc<std::cell::Cell<f32>>,
     fix_focus: FocusHandle,
     fix_focus_pending: bool,
     /// Return focus to the library after the Fix match panel closes itself.
@@ -353,6 +360,8 @@ pub struct LibraryView {
     /// Outside ratings by title (see ratings.rs), and the titles being fetched.
     ratings: HashMap<TitleKey, miru_core::ratings::TitleRatings>,
     ratings_pending: std::collections::HashSet<TitleKey>,
+    /// Whether ratings are being fetched for a grid sorted by a site's rating.
+    ratings_filling: bool,
     /// The outcome of the last backup or restore, shown under the Backup rows.
     backup_status: Option<(SharedString, bool)>,
     /// The collapsed-sidebar icon whose label is popped out (see `side_tip`).
@@ -489,6 +498,9 @@ impl LibraryView {
             fix_match: None,
             cast_pane: None,
             cast_epoch: 0,
+            details_modal: None,
+            details_scroll: Default::default(),
+            synopsis_width: Rc::default(),
             fix_focus: cx.focus_handle(),
             fix_focus_pending: false,
             fix_focus_restore: false,
@@ -516,6 +528,7 @@ impl LibraryView {
             nav_frame: Instant::now(),
             ratings: HashMap::new(),
             ratings_pending: std::collections::HashSet::new(),
+            ratings_filling: false,
             backup_status: None,
             side_tip_key: None,
             side_tip_epoch: 0,
@@ -583,6 +596,7 @@ impl LibraryView {
         };
         view.start_folder_watch(cx);
         view.reload();
+        view.fill_sort_ratings(cx);
         view.start_sync(cx);
         view.start_hero_rotation(cx);
         view.auto_check_for_updates(cx);
@@ -664,11 +678,13 @@ impl LibraryView {
 
     fn reload(&mut self) {
         let result = (|| -> miru_core::db::Result<()> {
+            // Every cached rating, so the grids can sort by a site's rating.
+            self.ratings = self.db.all_title_ratings()?;
             let mut movies = self.db.library(ItemKind::Movie)?;
-            sort_items(&mut movies, self.settings.movie_sort);
+            sort_items(&mut movies, self.settings.movie_sort, &self.ratings);
             self.movies = Rc::new(movies);
             let mut shows = self.db.library(ItemKind::Show)?;
-            sort_items(&mut shows, self.settings.show_sort);
+            sort_items(&mut shows, self.settings.show_sort, &self.ratings);
             self.shows = Rc::new(shows);
             (self.watched_movies, self.watched_shows) = self.db.watched_titles()?;
             self.apply_filters();
@@ -845,6 +861,7 @@ impl LibraryView {
             let scan_ok = this
                 .update(cx, |view, cx| {
                     view.reload();
+                    view.fill_sort_ratings(cx);
                     view.fill_continue_art(cx);
                     match &scanned {
                         Ok(report) => {
@@ -888,6 +905,7 @@ impl LibraryView {
                 let more = this
                     .update(cx, |view, cx| {
                         view.reload();
+                        view.fill_sort_ratings(cx);
                         let more = match saved {
                             Ok(n) => n > 0,
                             Err(e) => {
@@ -1081,6 +1099,7 @@ impl LibraryView {
         self.log_memory("navigate", cx);
         self.close_genre_menu();
         self.cast_pane = None;
+        self.details_modal = None;
         self.close_more_menu();
         self.close_card_menu();
         self.close_collection_menu();
@@ -1434,6 +1453,7 @@ impl LibraryView {
                 self.close_genre_menu();
                 cx.notify();
             }
+            "escape" if self.details_modal.is_some() => self.close_details(cx),
             "escape" if self.cast_pane.is_some() => self.cast_back(cx),
             "escape" if self.more_menu => {
                 self.close_more_menu();
@@ -1748,6 +1768,7 @@ impl Render for LibraryView {
             )
             .children(overlay)
             .child(self.render_cast_pane(cx))
+            .child(self.render_details_modal(window, cx))
             .child(self.render_fix_match(window, cx))
             .child(self.render_card_menu(cx))
             .child(self.render_collection_menu(cx))
