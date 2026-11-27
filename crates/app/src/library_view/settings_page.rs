@@ -370,80 +370,189 @@ impl LibraryView {
         let about_rows = self.about_rows(cx);
         folders.push(library_actions.into_any_element());
 
-        div()
+        let sections: Vec<(&'static str, &'static str, Vec<AnyElement>)> = vec![
+            (
+                "Library",
+                "Folders Miru scans for movies and TV shows. Files are never modified.",
+                folders,
+            ),
+            (
+                "Playback",
+                "Applies the next time you start playing something.",
+                playback_rows,
+            ),
+            (
+                "Subtitles",
+                "Size, style and colour apply to plain text subtitles; styled subtitles (common \
+                 in anime) keep their own look. Takes effect the next time a video starts.",
+                subtitle_rows,
+            ),
+            ("Home", "", home_rows),
+            (
+                "Sidebar",
+                "Drag to choose the order of the sidebar. Settings always stays at the bottom.",
+                sidebar_rows,
+            ),
+            (
+                "Metadata",
+                "Where posters, artwork and details come from.",
+                metadata_rows,
+            ),
+            (
+                "Ratings",
+                "Ratings from other sites on movie and show pages, via MDBList.",
+                ratings_rows,
+            ),
+            (
+                "Watch History",
+                "Removing an item clears its resume point and watched mark. Files are not deleted.",
+                history_rows,
+            ),
+            ("Backup", "", backup_rows),
+            (
+                "Keyboard shortcuts",
+                "Alt+← and the mouse back button work anywhere in the library.",
+                shortcut_rows(),
+            ),
+            ("About", "", about_rows),
+        ];
+
+        // The contents list only appears when there's room for it beside full-width cards.
+        let width = match self.detail_scroll.bounds().size.width {
+            w if w > px(0.) => w,
+            _ => window.viewport_size().width,
+        };
+        let with_nav = width >= px(2. * PAGE_PADDING + SETTINGS_NAV_W + SETTINGS_NAV_GAP + 640.);
+        let titles: Vec<&'static str> = sections.iter().map(|(title, ..)| *title).collect();
+        let active = self.active_settings_section(titles.len());
+
+        // Every child of the scroll view is a full-width row with the same column layout, so
+        // the overlaid contents list lines up with the cards, and each section is a direct
+        // child the scroll handle can locate.
+        let title = div()
+            .h(px(SETTINGS_TITLE_H))
+            .flex()
+            .items_center()
+            .font_family(theme::FONT_DISPLAY)
+            .text_size(px(40.))
+            .font_weight(FontWeight::BOLD)
+            .child("Settings");
+        let page = div()
             .id("settings-page")
             .size_full()
+            .flex()
+            .flex_col()
+            .gap(px(SETTINGS_SECTION_GAP))
             .overflow_y_scroll()
             .track_scroll(&self.detail_scroll)
-            .child(
+            .child(settings_column(with_nav, None, title).pt(px(SETTINGS_TOP)))
+            .children(sections.into_iter().map(|(title, description, rows)| {
+                settings_column(with_nav, None, section(title, description, rows))
+            }))
+            // Bottom padding (padding on the scroll view itself would scroll with the offset).
+            .child(div().h(px(64. - SETTINGS_SECTION_GAP)).flex_shrink_0());
+
+        div()
+            .relative()
+            .size_full()
+            .child(page)
+            .when(with_nav, |d| {
+                let nav = self.settings_nav(&titles, active, cx);
+                d.child(
+                    div()
+                        .absolute()
+                        .top(px(SETTINGS_TOP + SETTINGS_TITLE_H + SETTINGS_SECTION_GAP))
+                        .left_0()
+                        .w_full()
+                        .child(settings_column(true, Some(nav), div())),
+                )
+            })
+    }
+
+    /// Which section the contents list highlights: the one jumped to while the page hasn't
+    /// moved since, otherwise the last one whose heading has reached the top of the view.
+    fn active_settings_section(&self, count: usize) -> usize {
+        let handle = &self.detail_scroll;
+        let offset = handle.offset().y;
+        if let Some((ix, landed)) = self.settings_jump
+            && (offset - landed).abs() < px(1.)
+            && ix < count
+        {
+            return ix;
+        }
+        let line = handle.bounds().top() + px(SETTINGS_NAV_TOP + 24.);
+        let mut active = 0;
+        for ix in 0..count {
+            match handle.bounds_for_item(ix + 1) {
+                Some(b) if b.top() + offset <= line => active = ix,
+                _ => break,
+            }
+        }
+        // At the very bottom the last sections can never reach the top, so the end of the page
+        // belongs to the last one.
+        let max = handle.max_offset().y;
+        if max > px(0.) && offset <= -max + px(1.) {
+            active = count.saturating_sub(1);
+        }
+        active
+    }
+
+    /// Scroll so section `ix`'s heading sits level with the top of the contents list.
+    fn jump_to_settings_section(&mut self, ix: usize, cx: &mut Context<Self>) {
+        let handle = &self.detail_scroll;
+        let Some(item) = handle.bounds_for_item(ix + 1) else {
+            return;
+        };
+        let offset = handle.offset();
+        // Child bounds are recorded at their unscrolled layout position.
+        let in_content = item.top() - handle.bounds().top();
+        let target = (px(SETTINGS_NAV_TOP) - in_content)
+            .min(px(0.))
+            .max(-handle.max_offset().y);
+        handle.set_offset(gpui::point(offset.x, target));
+        self.settings_jump = Some((ix, target));
+        cx.notify();
+    }
+
+    fn settings_nav(&self, titles: &[&'static str], active: usize, cx: &mut Context<Self>) -> Div {
+        div()
+            .flex()
+            .flex_col()
+            .gap_0p5()
+            .children(titles.iter().enumerate().map(|(ix, title)| {
+                let current = ix == active;
                 div()
-                    .w_full()
-                    .flex()
-                    .justify_center()
-                    .pt(px(NAV_HEIGHT + 32.))
-                    .pb_16()
-                    .px(px(PAGE_PADDING))
-                    .child(
-                        div()
-                            .w_full()
-                            .max_w(px(820.))
-                            .flex()
-                            .flex_col()
-                            .gap_8()
+                    .id(("settings-nav", ix))
+                    .relative()
+                    .px_3()
+                    .py(px(6.))
+                    .rounded(px(8.))
+                    .text_sm()
+                    .cursor_pointer()
+                    .when(current, |d| {
+                        d.bg(rgba(0xffffff14))
+                            .text_color(theme::text())
+                            .font_weight(FontWeight::MEDIUM)
                             .child(
                                 div()
-                                    .font_family(theme::FONT_DISPLAY)
-                                    .text_size(px(40.))
-                                    .font_weight(FontWeight::BOLD)
-                                    .child("Settings"),
+                                    .absolute()
+                                    .left_0()
+                                    .top(px(8.))
+                                    .bottom(px(8.))
+                                    .w(px(3.))
+                                    .rounded_full()
+                                    .bg(theme::accent()),
                             )
-                            .child(section(
-                                "Library",
-                                "Folders Miru scans for movies and TV shows. Files are never modified.",
-                                folders,
-                            ))
-                            .child(section(
-                                "Playback",
-                                "Applies the next time you start playing something.",
-                                playback_rows,
-                            ))
-                            .child(section(
-                                "Subtitles",
-                                "Size, style and colour apply to plain text subtitles; styled \
-                                 subtitles (common in anime) keep their own look. Takes effect \
-                                 the next time a video starts.",
-                                subtitle_rows,
-                            ))
-                            .child(section("Home", "", home_rows))
-                            .child(section(
-                                "Sidebar",
-                                "Drag to choose the order of the sidebar. Settings always stays at the bottom.",
-                                sidebar_rows,
-                            ))
-                            .child(section(
-                                "Metadata",
-                                "Where posters, artwork and details come from.",
-                                metadata_rows,
-                            ))
-                            .child(section(
-                                "Ratings",
-                                "Ratings from other sites on movie and show pages, via MDBList.",
-                                ratings_rows,
-                            ))
-                            .child(section(
-                                "Watch History",
-                                "Removing an item clears its resume point and watched mark. Files are not deleted.",
-                                history_rows,
-                            ))
-                            .child(section("Backup", "", backup_rows))
-                            .child(section(
-                                "Keyboard shortcuts",
-                                "Alt+← and the mouse back button work anywhere in the library.",
-                                shortcut_rows(),
-                            ))
-                            .child(section("About", "", about_rows)),
-                    ),
-            )
+                    })
+                    .when(!current, |d| {
+                        d.text_color(theme::text_secondary())
+                            .hover(|s| s.text_color(theme::text()).bg(rgba(0xffffff0a)))
+                    })
+                    .child(*title)
+                    .on_click(
+                        cx.listener(move |this, _, _, cx| this.jump_to_settings_section(ix, cx)),
+                    )
+            }))
     }
 
     pub(super) fn clear_history(&mut self, cx: &mut Context<Self>) {
@@ -816,6 +925,44 @@ impl LibraryView {
             .child(action)
             .into_any_element()
     }
+}
+
+/// Space above the "Settings" title, clearing the floating navigation bar.
+const SETTINGS_TOP: f32 = NAV_HEIGHT + 32.;
+const SETTINGS_TITLE_H: f32 = 48.;
+const SETTINGS_SECTION_GAP: f32 = 32.;
+/// Where the contents list starts, from the top of the page: level with the first section
+/// before any scrolling, and where a jumped-to section's heading lands.
+const SETTINGS_NAV_TOP: f32 = SETTINGS_TOP + SETTINGS_TITLE_H + SETTINGS_SECTION_GAP;
+const SETTINGS_NAV_W: f32 = 168.;
+const SETTINGS_NAV_GAP: f32 = 48.;
+const SETTINGS_CARD_MAX_W: f32 = 820.;
+
+/// One row of the settings layout: a centred group of the contents-list column (when shown)
+/// and the cards column. The page and the overlaid contents list both use it so they line up.
+fn settings_column(with_nav: bool, nav: Option<Div>, content: impl IntoElement) -> Div {
+    let max_w = if with_nav {
+        SETTINGS_CARD_MAX_W + SETTINGS_NAV_W + SETTINGS_NAV_GAP
+    } else {
+        SETTINGS_CARD_MAX_W
+    };
+    div()
+        .w_full()
+        .flex_shrink_0()
+        .flex()
+        .justify_center()
+        .px(px(PAGE_PADDING))
+        .child(
+            div()
+                .w_full()
+                .max_w(px(max_w))
+                .flex()
+                .gap(px(SETTINGS_NAV_GAP))
+                .when(with_nav, |d| {
+                    d.child(div().w(px(SETTINGS_NAV_W)).flex_shrink_0().children(nav))
+                })
+                .child(div().flex_1().min_w_0().child(content)),
+        )
 }
 
 /// A titled group of settings rows on a frosted card.

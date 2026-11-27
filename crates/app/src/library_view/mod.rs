@@ -1,7 +1,7 @@
 //! Library browsing: a cinematic home (rotating hero + shelves), movie and show grids, and
 //! full-bleed detail pages.
 
-use std::collections::{BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::hash::{BuildHasher, Hash, Hasher};
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -15,7 +15,7 @@ use gpui::{
 };
 use miru_core::db::{Db, MediaFile};
 use miru_core::episodes::{ArtSource, EpisodeArt};
-use miru_core::library::{ItemKind, LibraryItem, Metadata, TitleKey};
+use miru_core::library::{ItemKind, LibraryItem, Metadata, PersonMatch, TitleKey};
 use miru_core::parse::ParsedMedia;
 use miru_core::playback::{ContinueReason, Progress};
 use miru_core::settings::{
@@ -39,6 +39,7 @@ mod cast;
 mod collections;
 mod detail;
 mod details_modal;
+mod episode_list;
 mod fix_match;
 mod grid;
 mod hero;
@@ -48,6 +49,7 @@ mod nav_order;
 mod poster_drag;
 mod ratings;
 mod search;
+mod select;
 mod settings_page;
 mod sidebar;
 mod watchlist;
@@ -58,6 +60,7 @@ use grid::*;
 use menus::MenuEntry;
 use miru_core::collections::Collection;
 use poster_drag::{DropTarget, Landing, PosterDrag};
+use select::SelectPlace;
 use settings_page::*;
 
 const PAGE_PADDING: f32 = 48.;
@@ -104,6 +107,7 @@ const HISTORY_PREVIEW: usize = 6;
 /// Live results shown in the search panel.
 const PANEL_TITLE_HITS: usize = 6;
 const PANEL_EPISODE_HITS: usize = 4;
+const PANEL_PEOPLE_HITS: usize = 3;
 const EPISODE_ART_BATCH: u32 = 4;
 const EPISODE_CARD_W: f32 = 352.;
 const SYNOPSIS_LINE_H: f32 = 20.;
@@ -321,6 +325,15 @@ pub struct LibraryView {
     genre_menu_closed: Instant,
     /// The title "Surprise me" opened last, so it doesn't pick the same one twice running.
     last_surprise: Option<TitleKey>,
+    /// Settings section last jumped to from its contents list, and the scroll offset the jump
+    /// landed on. It stays highlighted until the page is scrolled away from there (near the
+    /// bottom several short sections fit on screen, so position alone can't tell which).
+    settings_jump: Option<(usize, gpui::Pixels)>,
+    /// Titles chosen in a grid to change together (see select.rs), and its "Add to
+    /// collection" menu: open, and when it last closed.
+    selection: Option<select::Selection>,
+    bulk_menu: bool,
+    bulk_menu_closed: Instant,
     /// Detail page "⋯" menu: open, and when it last closed (see `genre_menu_closed`).
     more_menu: bool,
     more_menu_closed: Instant,
@@ -436,6 +449,10 @@ pub struct LibraryView {
     search_titles: Vec<LibraryItem>,
     search_episodes: Vec<MediaFile>,
     search_art: HashMap<i64, EpisodeArt>,
+    /// People matching the search, with how many library titles they are in.
+    search_people: Vec<(PersonMatch, usize)>,
+    /// Cached photos of the people found, by person id.
+    search_photos: HashMap<i64, String>,
     /// Horizontal scroll state per shelf, for the chevron buttons and edge fades.
     shelf_scrolls: HashMap<&'static str, ScrollHandle>,
     /// Shelf under the pointer, and shelf whose arrow button is under the pointer.
@@ -505,6 +522,10 @@ impl LibraryView {
             genre_menu: None,
             genre_menu_closed: Instant::now(),
             last_surprise: None,
+            settings_jump: None,
+            selection: None,
+            bulk_menu: false,
+            bulk_menu_closed: Instant::now(),
             more_menu: false,
             more_menu_closed: Instant::now(),
             fix_match: None,
@@ -587,6 +608,8 @@ impl LibraryView {
             search_titles: Vec::new(),
             search_episodes: Vec::new(),
             search_art: HashMap::new(),
+            search_people: Vec::new(),
+            search_photos: HashMap::new(),
             shelf_scrolls: SHELVES
                 .iter()
                 .map(|id| (*id, ScrollHandle::new()))
@@ -1121,6 +1144,10 @@ impl LibraryView {
         self.collection_delete = None;
         let same_tab = matches!((&self.page, &page), (Page::Browse(a), Page::Browse(b)) if a == b);
         if !same_tab {
+            self.selection = None;
+            self.bulk_menu = false;
+        }
+        if !same_tab {
             let previous = std::mem::replace(&mut self.page, page);
             self.back_stack.push(previous);
             if self.back_stack.len() > HISTORY_DEPTH {
@@ -1443,6 +1470,16 @@ impl LibraryView {
         cx: &mut Context<Self>,
     ) {
         let k = &event.keystroke;
+        // Ctrl+A selects every title on a grid, collection or the Watchlist.
+        if let Some(place) = self.select_place()
+            && (k.modifiers.control || k.modifiers.platform)
+            && !k.modifiers.alt
+            && k.key == "a"
+        {
+            self.select_all(place, cx);
+            cx.stop_propagation();
+            return;
+        }
         if k.modifiers.control || k.modifiers.alt || k.modifiers.platform {
             return;
         }
@@ -1486,6 +1523,12 @@ impl LibraryView {
                 self.collection_delete = None;
                 cx.notify();
             }
+            "escape" if self.bulk_menu => {
+                self.bulk_menu = false;
+                self.bulk_menu_closed = Instant::now();
+                cx.notify();
+            }
+            "escape" if self.selection.is_some() => self.stop_selecting(cx),
             "backspace" | "escape" => self.go_back(cx),
             _ => return,
         }
@@ -1660,6 +1703,12 @@ impl Render for LibraryView {
             window.focus(&self.fix_focus, cx);
         }
         if std::mem::take(&mut self.fix_focus_restore) {
+            window.focus(&self.focus, cx);
+        }
+        // Clicking a button focuses it; when that button then goes away (the selection bar's
+        // Done, a closed menu) focus is left nowhere and shortcuts like Ctrl+K stop working.
+        // Take it back.
+        if window.focused(cx).is_none() && window.is_window_active() {
             window.focus(&self.focus, cx);
         }
         // Settings stays reachable with an empty library: that is where folders are added.

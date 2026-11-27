@@ -253,6 +253,27 @@ const MIGRATIONS: &[&str] = &[
         PRIMARY KEY (kind, title, year)
     );
 ",
+    r"
+    -- Directors (movies) and creators (shows) share the cast table: `job` is NULL for acting
+    -- roles. People are searchable by name.
+    ALTER TABLE title_cast ADD COLUMN job TEXT;
+    CREATE VIRTUAL TABLE people_search USING fts5(
+        name,
+        content = 'title_cast',
+        tokenize = 'unicode61 remove_diacritics 2'
+    );
+    INSERT INTO people_search(people_search) VALUES ('rebuild');
+    CREATE TRIGGER title_cast_ai AFTER INSERT ON title_cast BEGIN
+        INSERT INTO people_search(rowid, name) VALUES (new.rowid, new.name);
+    END;
+    CREATE TRIGGER title_cast_ad AFTER DELETE ON title_cast BEGIN
+        INSERT INTO people_search(people_search, rowid, name) VALUES ('delete', old.rowid, old.name);
+    END;
+    CREATE TRIGGER title_cast_au AFTER UPDATE ON title_cast BEGIN
+        INSERT INTO people_search(people_search, rowid, name) VALUES ('delete', old.rowid, old.name);
+        INSERT INTO people_search(rowid, name) VALUES (new.rowid, new.name);
+    END;
+",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]

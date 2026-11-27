@@ -33,6 +33,7 @@ impl LibraryView {
                     .child(format!("{count} titles")),
             )
             .child(div().flex_1())
+            .child(self.select_button(SelectPlace::Grid(tab), count, cx))
             .child(self.surprise_button(tab, count, cx))
             .child(self.watched_dropdown(tab, cx))
             .child(self.genre_dropdown(tab, cx))
@@ -75,14 +76,17 @@ impl LibraryView {
         self.grid_cols.set(cols);
         let tile = (width - SHELF_GAP * (cols as f32 - 1.)) / cols as f32;
         let rows = count.div_ceil(cols);
+        // While selecting, an empty row at the end lets the last posters scroll clear of the
+        // selection bar.
+        let spacer = usize::from(self.selecting(SelectPlace::Grid(tab)));
 
         let list = uniform_list(
             "grid",
-            rows,
+            rows + spacer,
             cx.processor(move |this, range: std::ops::Range<usize>, _window, cx| {
                 range
                     .map(|row| {
-                        let start = row * cols;
+                        let start = (row * cols).min(items.len());
                         let end = (start + cols).min(items.len());
                         div()
                             .flex()
@@ -103,11 +107,13 @@ impl LibraryView {
         .flex_1();
 
         div()
+            .relative()
             .size_full()
             .flex()
             .flex_col()
             .child(header)
             .child(list)
+            .child(self.render_selection_bar(SelectPlace::Grid(tab), cx))
             .into_any_element()
     }
 
@@ -200,6 +206,7 @@ impl LibraryView {
             .update(&self.movies, |i| movies.contains(&i.file_id));
         self.show_filter
             .update(&self.shows, |i| shows.contains(&i.key.title.to_lowercase()));
+        self.prune_selection();
     }
 
     fn set_watched_filter(&mut self, tab: Tab, value: WatchedFilter, cx: &mut Context<Self>) {

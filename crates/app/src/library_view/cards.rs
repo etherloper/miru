@@ -34,6 +34,8 @@ pub(super) enum CardContent {
         item: LibraryItem,
         width: f32,
         watched: bool,
+        /// While choosing titles in a grid: whether this one is chosen.
+        selected: Option<bool>,
     },
     Continue(ContinueCard),
     Episode {
@@ -147,6 +149,7 @@ impl LibraryView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let watched = self.is_watched(item);
+        let selected = self.selection_state(scope, &item.key);
         let slot = (
             scope,
             format!(
@@ -157,13 +160,14 @@ impl LibraryView {
         self.cached_card(
             slot,
             |c| {
-                matches!(c, CardContent::Poster { item: i, width: w, watched: d }
-                    if *w == width && *d == watched && i == item)
+                matches!(c, CardContent::Poster { item: i, width: w, watched: d, selected: s }
+                    if *w == width && *d == watched && *s == selected && i == item)
             },
             || CardContent::Poster {
                 item: item.clone(),
                 width,
                 watched,
+                selected,
             },
             |_| (width, width * 1.5 + CARD_GAP + CAPTION_H),
             cx,
@@ -361,11 +365,42 @@ impl Card {
         item: &LibraryItem,
         width: f32,
         watched: bool,
+        selected: Option<bool>,
         cx: &mut Context<Self>,
     ) -> Div {
-        let more = self
-            .hovered
+        // While selecting, a click chooses the poster: no menu button.
+        let more = (self.hovered && selected.is_none())
             .then(|| self.poster_more_button(item.key.clone(), cx));
+        let check = selected.map(|on| {
+            div()
+                .absolute()
+                .top(px(10.))
+                .left(px(10.))
+                .size(px(26.))
+                .rounded_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .border_2()
+                .map(|d| {
+                    if on {
+                        d.bg(theme::accent())
+                            .border_color(theme::accent())
+                            .child(icon("icons/check.svg", 14., theme::bg()))
+                    } else {
+                        d.bg(rgba(0x00000080)).border_color(rgba(0xffffffd9))
+                    }
+                })
+        });
+        // A ring round chosen posters (drawn inside, so it isn't clipped by the rounding).
+        let ring = (selected == Some(true)).then(|| {
+            div()
+                .absolute()
+                .inset_0()
+                .rounded(px(theme::RADIUS_CARD))
+                .border_3()
+                .border_color(theme::accent())
+        });
         let meta = item.metadata.as_ref();
         let title: SharedString = item.display_title().to_string().into();
         let caption: SharedString = match item.key.kind {
@@ -415,6 +450,8 @@ impl Card {
                         .child(icon("icons/check.svg", 12., theme::text())),
                 )
             })
+            .children(ring)
+            .children(check)
             .children(more);
         div()
             .w(px(width))
@@ -776,7 +813,7 @@ impl Card {
     }
 }
 
-type CardClick = Box<dyn Fn(&mut Card, &mut Context<Card>)>;
+type CardClick = Box<dyn Fn(&mut Card, gpui::Modifiers, &mut Context<Card>)>;
 
 impl Render for Card {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -785,13 +822,28 @@ impl Render for Card {
                 item,
                 width,
                 watched,
+                selected,
             } => {
                 let key = item.key.clone();
+                let selecting = selected.is_some();
+                let scope = self.scope;
                 (
-                    self.poster_body(&item.clone(), *width, *watched, cx),
-                    Box::new(move |card, cx| {
+                    self.poster_body(&item.clone(), *width, *watched, *selected, cx),
+                    Box::new(move |card, modifiers, cx| {
+                        let key = key.clone();
                         card.library
-                            .update(cx, |library, cx| library.open_key(&key, cx))
+                            .update(cx, |library, cx| {
+                                if selecting {
+                                    library.click_selected(key, modifiers.shift, cx);
+                                    return;
+                                }
+                                // Ctrl+click starts choosing, with this poster, where the page
+                                // allows it.
+                                let ctrl = modifiers.control || modifiers.platform;
+                                if !(ctrl && library.ctrl_click_poster(scope, key.clone(), cx)) {
+                                    library.open_key(&key, cx)
+                                }
+                            })
                             .ok();
                     }),
                 )
@@ -800,7 +852,7 @@ impl Render for Card {
                 let request = card.request.clone();
                 (
                     self.continue_body(&card.clone(), cx),
-                    Box::new(move |card, cx| card.play(request.clone(), cx)),
+                    Box::new(move |card, _, cx| card.play(request.clone(), cx)),
                 )
             }
             CardContent::Episode {
@@ -820,12 +872,18 @@ impl Render for Card {
                 );
                 (
                     self.episode_body(&show_title, accent, &file, progress, art.as_ref(), cx),
-                    Box::new(move |card, cx| card.play(request.clone(), cx)),
+                    Box::new(move |card, _, cx| card.play(request.clone(), cx)),
                 )
             }
         };
         let press = match &self.content {
-            CardContent::Poster { item, width, .. } => {
+            // No dragging while choosing: a press is a click on the check.
+            CardContent::Poster {
+                item,
+                width,
+                selected: None,
+                ..
+            } => {
                 let art = CarryArt {
                     poster: item.metadata.as_ref().and_then(|m| m.poster_file.clone()),
                     title: item.display_title().to_string().into(),
@@ -857,14 +915,14 @@ impl Render for Card {
             .focus_visible(theme::focus_ring)
             .cursor_pointer()
             .on_hover(cx.listener(|this, hovered: &bool, _, cx| this.set_hovered(*hovered, cx)))
-            .on_click(cx.listener(move |this, _, _, cx| {
+            .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
                 // Releasing after dragging the row lands on a card; that isn't a click on it.
                 let dragging = this
                     .library
                     .upgrade()
                     .is_some_and(|library| library.read(cx).click_ends_drag());
                 if !dragging {
-                    on_click(this, cx);
+                    on_click(this, event.modifiers(), cx);
                 }
             }))
             .child(body)

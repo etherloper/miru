@@ -49,6 +49,9 @@ pub struct Metadata {
     /// Full cast with TMDB ids and photos. Filled by lookups and saved to its own table by
     /// `save_metadata`; empty when metadata is read back (use `Db::cast`).
     pub credits: Vec<CastMember>,
+    /// Directors (movies) or creators (shows), with the job in `character`. Saved and read
+    /// back like `credits` (use `Db::crew`).
+    pub crew: Vec<CastMember>,
     pub genres: Vec<String>,
     pub runtime_min: Option<u32>,
     pub release_year: Option<u16>,
@@ -65,8 +68,35 @@ pub struct CastMember {
     pub profile_path: Option<String>,
 }
 
+/// A person found by name in the cast or crew of stored titles.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PersonMatch {
+    pub person_id: i64,
+    pub name: String,
+    pub profile_path: Option<String>,
+    /// Plays a part in at least one title.
+    pub acts: bool,
+    /// Crew jobs held across titles, e.g. "Director".
+    pub jobs: Vec<String>,
+}
+
+impl PersonMatch {
+    pub fn as_member(&self) -> CastMember {
+        CastMember {
+            person_id: self.person_id,
+            name: self.name.clone(),
+            character: None,
+            profile_path: self.profile_path.clone(),
+        }
+    }
+}
+
+/// Where crew rows start in a title's cast table, after the cast.
+const CREW_POSITION: usize = 1000;
+
 /// Bump when lookups gain new fields or better matching, so stored titles are fetched again.
-pub const METADATA_VERSION: u32 = 4;
+/// 5: directors and creators.
+pub const METADATA_VERSION: u32 = 5;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LibraryItem {
@@ -126,6 +156,7 @@ fn metadata_row(r: &rusqlite::Row<'_>, at: usize) -> rusqlite::Result<Metadata> 
         certification: r.get(at + 9)?,
         cast: list(10)?,
         credits: Vec::new(),
+        crew: Vec::new(),
         genres: list(11)?,
         runtime_min: r.get(at + 12)?,
         release_year: r.get(at + 13)?,
@@ -266,12 +297,29 @@ impl Db {
             "DELETE FROM title_cast WHERE kind = ?1 AND title = ?2 AND year = ?3",
             params![key.kind.as_str(), key.title, key.year.unwrap_or(0)],
         )?;
+        // Plain INSERT: REPLACE would delete rows without firing the search index's trigger.
         let mut insert = self.conn.prepare(
-            "INSERT OR REPLACE INTO title_cast
-                (kind, title, year, position, person_id, name, character, profile_path)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            "INSERT INTO title_cast
+                (kind, title, year, position, person_id, name, character, profile_path, job)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         )?;
-        for (position, member) in m.credits.iter().enumerate() {
+        let cast = m
+            .credits
+            .iter()
+            .enumerate()
+            .map(|(i, member)| (i, member, false));
+        // Crew follow the cast, numbered from CREW_POSITION so the two never collide.
+        let crew = m
+            .crew
+            .iter()
+            .enumerate()
+            .map(|(i, member)| (CREW_POSITION + i, member, true));
+        for (position, member, is_crew) in cast.chain(crew) {
+            let (character, job) = if is_crew {
+                (None, member.character.as_deref())
+            } else {
+                (member.character.as_deref(), None)
+            };
             insert.execute(params![
                 key.kind.as_str(),
                 key.title,
@@ -279,8 +327,9 @@ impl Db {
                 position as i64,
                 member.person_id,
                 member.name,
-                member.character,
+                character,
                 member.profile_path,
+                job,
             ])?;
         }
         Ok(())
@@ -321,10 +370,19 @@ impl Db {
 
     /// A title's full cast, in billing order.
     pub fn cast(&self, key: &TitleKey) -> Result<Vec<CastMember>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT person_id, name, character, profile_path FROM title_cast
-             WHERE kind = ?1 AND title = ?2 AND year = ?3 ORDER BY position",
-        )?;
+        self.title_people(key, "job IS NULL", "character")
+    }
+
+    /// A title's directors or creators, with the job in `character`.
+    pub fn crew(&self, key: &TitleKey) -> Result<Vec<CastMember>> {
+        self.title_people(key, "job IS NOT NULL", "job")
+    }
+
+    fn title_people(&self, key: &TitleKey, filter: &str, role: &str) -> Result<Vec<CastMember>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT person_id, name, {role}, profile_path FROM title_cast
+             WHERE kind = ?1 AND title = ?2 AND year = ?3 AND {filter} ORDER BY position"
+        ))?;
         let rows = stmt.query_map(
             params![key.kind.as_str(), key.title, key.year.unwrap_or(0)],
             |r| {
@@ -339,11 +397,12 @@ impl Db {
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
-    /// Library titles a person appears in, with the character they play in each.
+    /// Library titles a person appears in or made, with their part in each: the character
+    /// they play, their job, or both ("Director · Joe").
     pub fn titles_with_person(&self, person_id: i64) -> Result<Vec<(TitleKey, Option<String>)>> {
         let mut stmt = self.conn.prepare(
-            "SELECT kind, title, year, character FROM title_cast WHERE person_id = ?1
-             ORDER BY year DESC, title",
+            "SELECT kind, title, year, character, job FROM title_cast WHERE person_id = ?1
+             ORDER BY year DESC, title, job IS NULL",
         )?;
         let rows = stmt.query_map([person_id], |r| {
             let kind = match r.get::<_, String>(0)?.as_str() {
@@ -351,14 +410,59 @@ impl Db {
                 _ => ItemKind::Movie,
             };
             let year: u16 = r.get(2)?;
+            let part: Option<String> = r.get::<_, Option<String>>(4)?.or(r.get(3)?);
             Ok((
                 TitleKey {
                     kind,
                     title: r.get(1)?,
                     year: (year != 0).then_some(year),
                 },
-                r.get(3)?,
+                part,
             ))
+        })?;
+        let mut titles: Vec<(TitleKey, Option<String>)> = Vec::new();
+        for row in rows {
+            let (key, part) = row?;
+            // Someone who both directs and acts in a title has two rows: show it once.
+            match titles.iter_mut().find(|(k, _)| *k == key) {
+                Some((_, existing)) => {
+                    *existing = match (existing.take(), part) {
+                        (Some(a), Some(b)) => Some(format!("{a} · {b}")),
+                        (a, b) => a.or(b),
+                    }
+                }
+                None => titles.push((key, part)),
+            }
+        }
+        Ok(titles)
+    }
+
+    /// People in the cast or crew of stored titles whose name matches `query` (word
+    /// prefixes, accent-insensitive), those with the most titles first.
+    pub fn search_people(&self, query: &str, limit: u32) -> Result<Vec<PersonMatch>> {
+        let Some(terms) = crate::db::fts_query(query) else {
+            return Ok(Vec::new());
+        };
+        let mut stmt = self.conn.prepare(
+            "SELECT c.person_id, MAX(c.name), MAX(c.profile_path),
+                    MAX(c.job IS NULL), group_concat(DISTINCT c.job)
+             FROM people_search s JOIN title_cast c ON c.rowid = s.rowid
+             WHERE people_search MATCH ?1 AND c.person_id != 0
+             GROUP BY c.person_id
+             ORDER BY COUNT(DISTINCT c.kind || '/' || c.title || '/' || c.year) DESC, MAX(c.name)
+             LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![terms, limit], |r| {
+            let jobs: Option<String> = r.get(4)?;
+            Ok(PersonMatch {
+                person_id: r.get(0)?,
+                name: r.get(1)?,
+                profile_path: r.get(2)?,
+                acts: r.get(3)?,
+                jobs: jobs
+                    .map(|j| j.split(',').map(str::to_string).collect())
+                    .unwrap_or_default(),
+            })
         })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
@@ -717,6 +821,51 @@ mod cast_tests {
         save(&heat, vec![member(1, "Al Pacino", "Hanna")]);
         assert_eq!(db.cast(&heat).unwrap().len(), 1);
         assert_eq!(db.titles_with_person(2).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn crew_is_kept_apart_from_cast_and_people_are_searchable() {
+        let db = Db::open_in_memory().unwrap();
+        let heat = TitleKey {
+            kind: ItemKind::Movie,
+            title: "Heat".into(),
+            year: Some(1995),
+        };
+        let meta = Metadata {
+            credits: vec![
+                member(1, "Al Pacino", "Hanna"),
+                member(9, "Michael Mann", "Cameo"),
+            ],
+            crew: vec![member(9, "Michael Mann", "Director")],
+            ..Default::default()
+        };
+        db.save_metadata(&heat, &MetadataResult::Matched(meta.clone()))
+            .unwrap();
+        assert_eq!(db.cast(&heat).unwrap().len(), 2);
+        let crew = db.crew(&heat).unwrap();
+        assert_eq!(crew.len(), 1);
+        assert_eq!(crew[0].character.as_deref(), Some("Director"));
+
+        // Directing and acting in one title is listed once, with both parts.
+        let titles = db.titles_with_person(9).unwrap();
+        assert_eq!(titles.len(), 1);
+        assert_eq!(titles[0].1.as_deref(), Some("Director · Cameo"));
+
+        let found = db.search_people("mann", 10).unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].name, "Michael Mann");
+        assert!(found[0].acts);
+        assert_eq!(found[0].jobs, ["Director"]);
+        assert_eq!(db.search_people("al pac", 10).unwrap()[0].person_id, 1);
+        assert!(db.search_people("nobody", 10).unwrap().is_empty());
+
+        // Saving again replaces the rows and keeps the search index in step.
+        db.save_metadata(&heat, &MetadataResult::Matched(meta))
+            .unwrap();
+        assert_eq!(db.search_people("mann", 10).unwrap().len(), 1);
+        db.save_metadata(&heat, &MetadataResult::Matched(Metadata::default()))
+            .unwrap();
+        assert!(db.search_people("mann", 10).unwrap().is_empty());
     }
 }
 

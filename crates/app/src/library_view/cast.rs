@@ -11,7 +11,9 @@ const PERSON_AVATAR: f32 = 96.;
 const CREDIT_POSTER_W: f32 = 112.;
 
 pub(super) struct CastPane {
-    key: TitleKey,
+    /// The title whose cast this is; `None` for a person opened on their own (from search).
+    key: Option<TitleKey>,
+    /// The title's name, or the search that found the person.
     title: String,
     members: Vec<CastMember>,
     /// Cached photo files by person id; filled in as downloads finish.
@@ -57,6 +59,11 @@ impl LibraryView {
             tracing::error!("reading cast: {e}");
             Vec::new()
         });
+        // Directors and creators lead the list, their job where a character would be.
+        let crew = self.db.crew(&item.key).unwrap_or_else(|e| {
+            tracing::error!("reading crew: {e}");
+            Vec::new()
+        });
         // Titles not refreshed since the full cast was added only have names.
         if members.is_empty() {
             members = meta
@@ -68,6 +75,7 @@ impl LibraryView {
                 })
                 .collect();
         }
+        members.splice(0..0, crew);
         let elsewhere = members
             .iter()
             .filter(|m| m.person_id != 0)
@@ -96,7 +104,7 @@ impl LibraryView {
             .filter_map(|m| Some((m.person_id, m.profile_path.clone()?)))
             .collect();
         self.cast_pane = Some(CastPane {
-            key: item.key.clone(),
+            key: Some(item.key.clone()),
             title: item.display_title().to_string(),
             members,
             photos,
@@ -117,7 +125,11 @@ impl LibraryView {
                 .spawn(async move { library_sync::cast_photos(&paths, &tmdb, &missing) })
                 .await;
             this.update(cx, |view, cx| {
-                let Some(pane) = view.cast_pane.as_mut().filter(|p| p.key == key) else {
+                let Some(pane) = view
+                    .cast_pane
+                    .as_mut()
+                    .filter(|p| p.key.as_ref() == Some(&key))
+                else {
                     return;
                 };
                 match fetched {
@@ -144,15 +156,88 @@ impl LibraryView {
     /// Esc: from a person back to the cast list, then closed.
     pub(super) fn cast_back(&mut self, cx: &mut Context<Self>) {
         match &mut self.cast_pane {
-            Some(pane) if pane.person.is_some() => pane.person = None,
+            Some(pane) if pane.person.is_some() && pane.key.is_some() => pane.person = None,
             Some(_) => self.cast_pane = None,
             None => return,
         }
         cx.notify();
     }
 
+    /// Opens `item`'s cast sheet on `member` (a name in "Directed by"); Back shows the cast.
+    pub(super) fn open_cast_person(
+        &mut self,
+        item: &LibraryItem,
+        member: CastMember,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_cast(item, cx);
+        self.open_person(member, cx);
+    }
+
+    /// Opens the sheet on one person, outside any title's cast (a person found by search).
+    pub(super) fn open_person_alone(&mut self, member: CastMember, cx: &mut Context<Self>) {
+        let mut photos = HashMap::new();
+        let file = self
+            .paths
+            .artwork
+            .join(format!("person-{}.jpg", member.person_id));
+        if let Some(path) = file.is_file().then(|| file.to_str()).flatten() {
+            photos.insert(member.person_id, path.to_string());
+        }
+        let missing: Vec<(i64, String)> = member
+            .profile_path
+            .clone()
+            .filter(|_| photos.is_empty())
+            .map(|p| (member.person_id, p))
+            .into_iter()
+            .collect();
+        let person_id = member.person_id;
+        self.cast_pane = Some(CastPane {
+            key: None,
+            title: format!("“{}”", self.search_query),
+            members: Vec::new(),
+            photos,
+            elsewhere: HashMap::new(),
+            person: None,
+        });
+        self.cast_epoch += 1;
+        self.open_person(member, cx);
+
+        let (Some(tmdb), false) = (self.tmdb.clone(), missing.is_empty()) else {
+            return;
+        };
+        let paths = self.paths.clone();
+        cx.spawn(async move |this, cx| {
+            let fetched = cx
+                .background_executor()
+                .spawn(async move { library_sync::cast_photos(&paths, &tmdb, &missing) })
+                .await;
+            this.update(cx, |view, cx| {
+                let Some(pane) = view.cast_pane.as_mut().filter(|p| {
+                    p.key.is_none()
+                        && p.person
+                            .as_ref()
+                            .is_some_and(|v| v.member.person_id == person_id)
+                }) else {
+                    return;
+                };
+                match fetched {
+                    Ok(photos) => pane.photos.extend(
+                        photos
+                            .into_iter()
+                            .filter_map(|(id, path)| Some((id, path.to_str()?.to_string()))),
+                    ),
+                    Err(e) => tracing::warn!("person photo: {e:#}"),
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     /// Library titles a person appears in, newest first.
-    fn library_credits(&self, person_id: i64) -> Vec<(LibraryItem, Option<String>)> {
+    pub(super) fn library_credits(&self, person_id: i64) -> Vec<(LibraryItem, Option<String>)> {
         let found = self.db.titles_with_person(person_id).unwrap_or_else(|e| {
             tracing::error!("reading credits: {e}");
             Vec::new()
@@ -371,7 +456,7 @@ impl LibraryView {
             .gap_3()
             .border_b_1()
             .border_color(rgba(0xffffff1f))
-            .when(pane.person.is_some(), |d| {
+            .when(pane.person.is_some() && pane.key.is_some(), |d| {
                 d.child(
                     round_button(
                         "cast-back",
@@ -398,7 +483,11 @@ impl LibraryView {
                             .font_family(theme::FONT_DISPLAY)
                             .text_size(px(20.))
                             .font_weight(FontWeight::SEMIBOLD)
-                            .child("Cast"),
+                            .child(if pane.key.is_some() {
+                                "Cast & Crew"
+                            } else {
+                                "Search"
+                            }),
                     )
                     .child(
                         div()
@@ -455,35 +544,11 @@ impl LibraryView {
     }
 
     fn avatar(&self, pane: &CastPane, member: &CastMember, size: f32) -> AnyElement {
-        let initials: String = member
-            .name
-            .split_whitespace()
-            .filter_map(|w| w.chars().next())
-            .take(2)
-            .collect();
-        div()
-            .relative()
-            .size(px(size))
-            .flex_shrink_0()
-            .rounded_full()
-            .overflow_hidden()
-            .bg(theme::placeholder(&member.name, None))
-            .flex()
-            .items_center()
-            .justify_center()
-            .text_size(px(size * 0.34))
-            .font_weight(FontWeight::SEMIBOLD)
-            .text_color(theme::text_secondary())
-            .child(initials)
-            .children(pane.photos.get(&member.person_id).map(|photo| {
-                div().absolute().inset_0().child(
-                    crate::image_cache::art_image_square(photo, (size * 2.) as u32)
-                        .size_full()
-                        .rounded_full()
-                        .object_fit(ObjectFit::Cover),
-                )
-            }))
-            .into_any_element()
+        avatar_circle(
+            &member.name,
+            pane.photos.get(&member.person_id).map(String::as_str),
+            size,
+        )
     }
 
     fn cast_list(&self, pane: &CastPane, cx: &mut Context<Self>) -> AnyElement {
@@ -568,10 +633,15 @@ impl LibraryView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let member = &person.member;
-        let here = member
-            .character
-            .as_ref()
-            .map(|c| format!("{c} in {}", pane.title));
+        // "Hanna in Heat"; crew read "Director of Heat".
+        let here = member.character.as_ref().map(|c| {
+            let of = if matches!(c.as_str(), "Director" | "Creator") {
+                "of"
+            } else {
+                "in"
+            };
+            format!("{c} {of} {}", pane.title)
+        });
         let known_for = self.known_for_section(person, cx);
         let posters = person
             .credits
@@ -580,7 +650,7 @@ impl LibraryView {
             .map(|(ix, (item, character))| {
                 let meta = item.metadata.as_ref();
                 let title = item.display_title().to_string();
-                let current = item.key == pane.key;
+                let current = pane.key.as_ref() == Some(&item.key);
                 let target = item.clone();
                 div()
                     .id(("person-credit", ix))
@@ -651,7 +721,7 @@ impl LibraryView {
         let others = person
             .credits
             .iter()
-            .filter(|(item, _)| item.key != pane.key)
+            .filter(|(item, _)| pane.key.as_ref() != Some(&item.key))
             .count();
 
         div()
@@ -717,4 +787,37 @@ impl LibraryView {
             .child(self.person_scroll.scrollbar(cx.entity_id()))
             .into_any_element()
     }
+}
+
+/// A round photo of someone, or their initials on a colour picked from their name while there
+/// is no photo.
+pub(super) fn avatar_circle(name: &str, photo: Option<&str>, size: f32) -> AnyElement {
+    let initials: String = name
+        .split_whitespace()
+        .filter_map(|w| w.chars().next())
+        .take(2)
+        .collect();
+    div()
+        .relative()
+        .size(px(size))
+        .flex_shrink_0()
+        .rounded_full()
+        .overflow_hidden()
+        .bg(theme::placeholder(name, None))
+        .flex()
+        .items_center()
+        .justify_center()
+        .text_size(px(size * 0.34))
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(theme::text_secondary())
+        .child(initials)
+        .children(photo.map(|photo| {
+            div().absolute().inset_0().child(
+                crate::image_cache::art_image_square(photo, (size * 2.) as u32)
+                    .size_full()
+                    .rounded_full()
+                    .object_fit(ObjectFit::Cover),
+            )
+        }))
+        .into_any_element()
 }

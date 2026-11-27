@@ -95,7 +95,9 @@ impl LibraryView {
                             } else {
                                 format!("{count} titles")
                             }),
-                    ),
+                    )
+                    .child(div().flex_1())
+                    .child(self.select_button(SelectPlace::Watchlist, count, cx)),
             );
         let body: AnyElement = if self.watchlist.is_empty() {
             div()
@@ -131,7 +133,12 @@ impl LibraryView {
                 .track_scroll(&self.collection_scroll)
                 .px(px(PAGE_PADDING))
                 .pt_3()
-                .pb(px(48.))
+                // Room for the selection bar under the last row while selecting.
+                .pb(px(if self.selecting(SelectPlace::Watchlist) {
+                    132.
+                } else {
+                    48.
+                }))
                 .flex()
                 .flex_wrap()
                 .gap_x(px(SHELF_GAP))
@@ -145,11 +152,13 @@ impl LibraryView {
                 .into_any_element()
         };
         div()
+            .relative()
             .size_full()
             .flex()
             .flex_col()
             .child(header)
             .child(body)
+            .child(self.render_selection_bar(SelectPlace::Watchlist, cx))
             .into_any_element()
     }
 

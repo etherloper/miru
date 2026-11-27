@@ -255,22 +255,31 @@ impl LibraryView {
             self.season_dropdown(&summary, current, cx)
         });
 
+        let as_list = self.settings.episode_list;
         let rows = episodes
             .iter()
-            .enumerate()
-            .filter(|(_, e)| season_of(&e.media) == season)
-            .map(|(_, file)| {
-                self.episode_card(
-                    "episodes",
-                    &show_title,
-                    &meta,
-                    file,
-                    progress.get(&file.id).copied(),
-                    art.get(&file.id),
-                    cx,
-                )
+            .filter(|e| season_of(&e.media) == season)
+            .map(|file| {
+                let (p, a) = (progress.get(&file.id).copied(), art.get(&file.id));
+                if as_list {
+                    self.episode_row(&show_title, &meta, file, p, a, cx)
+                } else {
+                    self.episode_card("episodes", &show_title, &meta, file, p, a, cx)
+                }
             })
             .collect::<Vec<_>>();
+        let episodes_body: AnyElement = if as_list {
+            div()
+                .px(px(PAGE_PADDING - 8.))
+                .pt_2()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .children(rows)
+                .into_any_element()
+        } else {
+            self.shelf_row("shelf-episodes", rows, cx)
+        };
 
         div()
             .id("show-page")
@@ -312,9 +321,11 @@ impl LibraryView {
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .child("Episodes"),
                             )
-                            .children(season_tabs),
+                            .children(season_tabs)
+                            .child(div().flex_1())
+                            .child(self.episode_view_toggle(cx)),
                     )
-                    .child(self.shelf_row("shelf-episodes", rows, cx)),
+                    .child(episodes_body),
             )
     }
 
@@ -419,6 +430,35 @@ impl LibraryView {
         }
         // "Starring" with the first few names, then a link to the full cast sheet.
         let cast_item = item.clone();
+        // "Directed by …" / "Created by …", each name opening that person in the cast sheet.
+        let crew = self.db.crew(&item.key).unwrap_or_else(|e| {
+            tracing::warn!("reading crew: {e}");
+            Vec::new()
+        });
+        let made_by = (!crew.is_empty()).then(|| {
+            let lead = match item.key.kind {
+                ItemKind::Movie => "Directed by",
+                ItemKind::Show => "Created by",
+            };
+            // Styled like "View full cast", spaced apart rather than joined with commas.
+            let names = crew.into_iter().enumerate().map(|(ix, member)| {
+                let title_item = item.clone();
+                detail_link(("detail-crew", ix), member.name.clone()).on_click(cx.listener(
+                    move |this, _, _, cx| this.open_cast_person(&title_item, member.clone(), cx),
+                ))
+            });
+            div()
+                .max_w(px(680.))
+                .flex()
+                .flex_wrap()
+                .items_center()
+                .gap_x_3()
+                .gap_y_1()
+                .text_sm()
+                .text_color(theme::text_secondary())
+                .child(lead)
+                .children(names)
+        });
         let starring =
             (!meta.cast.is_empty()).then(|| {
                 div()
@@ -602,6 +642,7 @@ impl LibraryView {
                         )
                     })
                     .children(synopsis)
+                    .children(made_by)
                     .children(starring)
                     .children(extra)
                     .child(div().mt_3().flex().items_center().gap_3().children(actions)),
@@ -716,7 +757,10 @@ pub(super) fn hero_art(item: &LibraryItem) -> AnyElement {
 }
 
 /// A small text link ("View full cast", "Read more"): bold, with a chevron, accent on hover.
-fn detail_link(id: &'static str, label: &'static str) -> gpui::Stateful<Div> {
+fn detail_link(
+    id: impl Into<gpui::ElementId>,
+    label: impl Into<SharedString>,
+) -> gpui::Stateful<Div> {
     div()
         .id(id)
         .tab_index(0)
@@ -729,7 +773,7 @@ fn detail_link(id: &'static str, label: &'static str) -> gpui::Stateful<Div> {
         .text_color(theme::text())
         .cursor_pointer()
         .hover(|s| s.text_color(theme::accent()))
-        .child(label)
+        .child(label.into())
         .child(icon(
             "icons/chevron-right.svg",
             12.,

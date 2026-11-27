@@ -330,6 +330,8 @@ pub struct Settings {
     pub auto_update: bool,
     /// When updates were last checked (unix seconds; 0 = never).
     pub update_checked_at: i64,
+    /// Show pages list episodes in rows instead of a row of cards.
+    pub episode_list: bool,
 }
 
 impl Default for Settings {
@@ -359,6 +361,7 @@ impl Default for Settings {
                 .collect(),
             auto_update: true,
             update_checked_at: 0,
+            episode_list: false,
         }
     }
 }
@@ -375,6 +378,7 @@ const ROTATE: &str = "home.rotate_featured";
 const WHOLE_LIBRARY: &str = "home.feature_whole_library";
 const SIDEBAR_ORDER: &str = "ui.sidebar_order";
 const AUTOPLAY: &str = "playback.autoplay_next";
+const EPISODE_LIST: &str = "library.episode_list";
 const SIDEBAR: &str = "ui.sidebar_collapsed";
 const PARSER_VERSION_KEY: &str = "scan.parser_version";
 const MOVIE_SORT: &str = "library.movie_sort";
@@ -435,6 +439,7 @@ impl Db {
                 .setting(SIDEBAR_ORDER)?
                 .map_or(defaults.sidebar_order, |v| NavItem::parse_order(&v)),
             autoplay_next: bool_of(self.setting(AUTOPLAY)?, defaults.autoplay_next),
+            episode_list: bool_of(self.setting(EPISODE_LIST)?, defaults.episode_list),
             sidebar_collapsed: bool_of(self.setting(SIDEBAR)?, defaults.sidebar_collapsed),
             movie_sort: self
                 .setting(MOVIE_SORT)?
@@ -496,6 +501,7 @@ impl Db {
                     .join(","),
             ),
             (AUTOPLAY, s.autoplay_next.to_string()),
+            (EPISODE_LIST, s.episode_list.to_string()),
             (SIDEBAR, s.sidebar_collapsed.to_string()),
             (MOVIE_SORT, s.movie_sort.stored()),
             (SHOW_SORT, s.show_sort.stored()),
@@ -612,6 +618,7 @@ mod tests {
             rating_sources: vec!["letterboxd".into(), "imdb".into()],
             auto_update: false,
             update_checked_at: 1_700_000_000,
+            episode_list: true,
         };
         db.save_settings(&custom).unwrap();
         assert_eq!(db.settings().unwrap(), custom);

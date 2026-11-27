@@ -188,6 +188,20 @@ struct DetailsResponse {
     aggregate_credits: Option<Credits>,
     release_dates: Option<Countries<CountryReleases>>,
     content_ratings: Option<Countries<CountryRating>>,
+    /// A show's creators (movies have directors in `credits.crew` instead).
+    #[serde(default)]
+    created_by: Vec<Person>,
+}
+
+/// A creator from `created_by`, or a crew member from `credits.crew` (with their job).
+#[derive(Debug, Deserialize)]
+struct Person {
+    #[serde(default)]
+    id: i64,
+    name: String,
+    profile_path: Option<String>,
+    #[serde(default)]
+    job: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -215,6 +229,8 @@ struct Image {
 struct Credits {
     #[serde(default)]
     cast: Vec<CastEntry>,
+    #[serde(default)]
+    crew: Vec<Person>,
 }
 
 /// A cast entry from `credits` (movies: `character`) or `aggregate_credits` (shows: one
@@ -271,6 +287,37 @@ impl DetailsResponse {
             .as_ref()
             .or(self.credits.as_ref())
             .map_or(&[], |c| c.cast.as_slice())
+    }
+
+    /// Directors of a movie, or creators of a show, with the job in `character`.
+    fn crew(&self) -> Vec<CastMember> {
+        let (people, job): (Vec<&Person>, &str) = if self.created_by.is_empty() {
+            let directors = self
+                .credits
+                .as_ref()
+                .map(|c| {
+                    c.crew
+                        .iter()
+                        .filter(|p| p.job.as_deref() == Some("Director"))
+                        .collect()
+                })
+                .unwrap_or_default();
+            (directors, "Director")
+        } else {
+            (self.created_by.iter().collect(), "Creator")
+        };
+        let mut crew: Vec<CastMember> = Vec::new();
+        for p in people {
+            if p.id != 0 && !crew.iter().any(|c| c.person_id == p.id) {
+                crew.push(CastMember {
+                    person_id: p.id,
+                    name: p.name.clone(),
+                    character: Some(job.to_string()),
+                    profile_path: p.profile_path.clone(),
+                });
+            }
+        }
+        crew
     }
 
     fn certification(&self) -> Option<String> {
@@ -846,6 +893,7 @@ pub fn lookup_id(
                 profile_path: p.profile_path.clone(),
             })
             .collect(),
+        crew: details.crew(),
         genres: details.genres.iter().map(|g| g.name.clone()).collect(),
         runtime_min: runtime,
         release_year: year_of(
@@ -1313,6 +1361,33 @@ mod tests {
         )
         .unwrap();
         assert_eq!(tv.certification().as_deref(), Some("TV-MA"));
+    }
+
+    #[test]
+    fn crew_is_directors_for_movies_and_creators_for_shows() {
+        let movie: DetailsResponse = serde_json::from_str(
+            r#"{"title":"Heat","credits":{"cast":[],"crew":[
+                {"id":9,"name":"Michael Mann","job":"Director"},
+                {"id":9,"name":"Michael Mann","job":"Director"},
+                {"id":4,"name":"Dante Spinotti","job":"Director of Photography"},
+                {"id":9,"name":"Michael Mann","job":"Writer"}]}}"#,
+        )
+        .unwrap();
+        let crew = movie.crew();
+        assert_eq!(crew.len(), 1);
+        assert_eq!(crew[0].name, "Michael Mann");
+        assert_eq!(crew[0].character.as_deref(), Some("Director"));
+
+        let show: DetailsResponse = serde_json::from_str(
+            r#"{"name":"Dark","created_by":[
+                {"id":1,"name":"Baran bo Odar","profile_path":"/b.jpg"},
+                {"id":2,"name":"Jantje Friese"}]}"#,
+        )
+        .unwrap();
+        let crew = show.crew();
+        assert_eq!(crew.len(), 2);
+        assert_eq!(crew[1].character.as_deref(), Some("Creator"));
+        assert_eq!(crew[0].profile_path.as_deref(), Some("/b.jpg"));
     }
 
     #[test]

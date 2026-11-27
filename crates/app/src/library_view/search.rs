@@ -29,6 +29,13 @@ impl LibraryView {
             .cloned()
             .map(SearchHit::Title)
             .chain(
+                self.search_people
+                    .iter()
+                    .take(PANEL_PEOPLE_HITS)
+                    .cloned()
+                    .map(|(person, titles)| SearchHit::Person(person, titles)),
+            )
+            .chain(
                 self.search_episodes
                     .iter()
                     .take(PANEL_EPISODE_HITS)
@@ -43,6 +50,7 @@ impl LibraryView {
         self.close_search(window, cx);
         match hit {
             SearchHit::Title(item) => self.open(&item, cx),
+            SearchHit::Person(person, _) => self.open_person_alone(person.as_member(), cx),
             // Episodes open their show, on the right season.
             SearchHit::Episode(file) => {
                 let show = match &file.media {
@@ -72,6 +80,7 @@ impl LibraryView {
         }
         self.search_query = query.clone();
         self.run_search(&query);
+        self.fetch_search_photos(cx);
         self.close_search(window, cx);
         self.navigate(Page::Browse(Tab::Search), cx);
     }
@@ -132,6 +141,7 @@ impl LibraryView {
         self.search_titles.clear();
         self.search_episodes.clear();
         self.search_art.clear();
+        self.search_people.clear();
         let query = query.trim().to_string();
         if query.is_empty() {
             return;
@@ -150,6 +160,26 @@ impl LibraryView {
                     self.search_titles.push(item.clone());
                 }
             }
+            // Only people with something in the library (casts outlive removed titles).
+            for person in self.db.search_people(&query, 30)? {
+                let titles = self.library_credits(person.person_id).len();
+                if titles > 0 {
+                    self.search_people.push((person, titles));
+                }
+            }
+            self.search_people
+                .sort_by_key(|(_, titles)| std::cmp::Reverse(*titles));
+            self.search_people.truncate(12);
+            let artwork = self.paths.artwork.clone();
+            self.search_photos = self
+                .search_people
+                .iter()
+                .filter_map(|(p, _)| {
+                    let file = artwork.join(format!("person-{}.jpg", p.person_id));
+                    let file = file.is_file().then_some(file)?;
+                    Some((p.person_id, file.to_str()?.to_string()))
+                })
+                .collect();
             self.search_episodes = self.db.search_episodes(&query, 30)?;
             let shows: BTreeSet<String> = self
                 .search_episodes
@@ -169,6 +199,39 @@ impl LibraryView {
         }
     }
 
+    /// Downloads photos of the people found that aren't cached yet, for the results page.
+    fn fetch_search_photos(&mut self, cx: &mut Context<Self>) {
+        let missing: Vec<(i64, String)> = self
+            .search_people
+            .iter()
+            .filter(|(p, _)| !self.search_photos.contains_key(&p.person_id))
+            .filter_map(|(p, _)| Some((p.person_id, p.profile_path.clone()?)))
+            .collect();
+        let (Some(tmdb), false) = (self.tmdb.clone(), missing.is_empty()) else {
+            return;
+        };
+        let paths = self.paths.clone();
+        cx.spawn(async move |this, cx| {
+            let fetched = cx
+                .background_executor()
+                .spawn(async move { library_sync::cast_photos(&paths, &tmdb, &missing) })
+                .await;
+            this.update(cx, |view, cx| {
+                match fetched {
+                    Ok(photos) => view.search_photos.extend(
+                        photos
+                            .into_iter()
+                            .filter_map(|(id, path)| Some((id, path.to_str()?.to_string()))),
+                    ),
+                    Err(e) => tracing::warn!("search photos: {e:#}"),
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     /// Results page for the last submitted query.
     pub(super) fn render_search(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let query = self.search_query.trim().to_string();
@@ -179,7 +242,8 @@ impl LibraryView {
                 .font_weight(FontWeight::SEMIBOLD)
                 .child(text)
         };
-        let count = self.search_titles.len() + self.search_episodes.len();
+        let count =
+            self.search_titles.len() + self.search_episodes.len() + self.search_people.len();
 
         // Same shape as the Movies and TV Shows headers: title, quiet count, one pill on the right.
         let new_search = div()
@@ -234,7 +298,7 @@ impl LibraryView {
             div()
                 .pt_10()
                 .text_color(theme::text_secondary())
-                .child("Try a different spelling, or search for an episode name.")
+                .child("Try a different spelling, or search for an episode name or a person.")
                 .into_any_element()
         } else {
             let episodes = self
@@ -281,6 +345,61 @@ impl LibraryView {
                 .iter()
                 .map(|item| self.poster_card("search", item, POSTER_W, cx))
                 .collect::<Vec<_>>();
+            let people = self
+                .search_people
+                .iter()
+                .enumerate()
+                .map(|(ix, (person, titles))| {
+                    let member = person.as_member();
+                    div()
+                        .id(("search-person", ix))
+                        .tab_index(0)
+                        .focus_visible(theme::focus_ring)
+                        .w(px(PERSON_TILE_W))
+                        .flex()
+                        .flex_col()
+                        .items_center()
+                        .gap_3()
+                        .cursor_pointer()
+                        .rounded(px(12.))
+                        .hover(|s| s.bg(rgba(0xffffff0f)))
+                        .py_3()
+                        .child(cast::avatar_circle(
+                            &person.name,
+                            self.search_photos
+                                .get(&person.person_id)
+                                .map(String::as_str),
+                            PERSON_TILE_W - 16.,
+                        ))
+                        .child(
+                            div()
+                                .w_full()
+                                .flex()
+                                .flex_col()
+                                .items_center()
+                                .gap_0p5()
+                                .child(
+                                    div()
+                                        .max_w_full()
+                                        .truncate()
+                                        .text_sm()
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .child(person.name.clone()),
+                                )
+                                .child(
+                                    div()
+                                        .max_w_full()
+                                        .truncate()
+                                        .text_xs()
+                                        .text_color(theme::text_tertiary())
+                                        .child(person_caption(person, *titles)),
+                                ),
+                        )
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.open_person_alone(member.clone(), cx)
+                        }))
+                })
+                .collect::<Vec<_>>();
             div()
                 .flex()
                 .flex_col()
@@ -300,6 +419,16 @@ impl LibraryView {
                                     .pt_3()
                                     .children(posters),
                             ),
+                    )
+                })
+                .when(!people.is_empty(), |d| {
+                    d.child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_2()
+                            .child(heading("People".into()))
+                            .child(div().flex().flex_wrap().gap_4().pt_1().children(people)),
                     )
                 })
                 .when(!episodes.is_empty(), |d| {
@@ -364,7 +493,7 @@ impl LibraryView {
                 .child(icon("icons/search.svg", 18., theme::text_tertiary()))
                 .child(div().flex_1().min_w_0().text_size(px(17.)).child(
                     self.search_draft.element(
-                        "Search movies, shows and episodes",
+                        "Search movies, shows, episodes and people",
                         theme::text(),
                         theme::text_tertiary(),
                         focused,
@@ -507,6 +636,17 @@ impl LibraryView {
                     .into_any_element();
                 (thumb, item.display_title().to_string(), subtitle)
             }
+            SearchHit::Person(person, titles) => (
+                cast::avatar_circle(
+                    &person.name,
+                    self.search_photos
+                        .get(&person.person_id)
+                        .map(String::as_str),
+                    40.,
+                ),
+                person.name.clone(),
+                person_caption(person, *titles),
+            ),
             SearchHit::Episode(file) => {
                 let show = match &file.media {
                     ParsedMedia::Episode { show, .. } => show.clone(),
@@ -609,5 +749,28 @@ impl LibraryView {
 #[allow(clippy::large_enum_variant)]
 pub(super) enum SearchHit {
     Title(LibraryItem),
+    /// Someone in the cast or crew, with how many library titles they're in.
+    Person(PersonMatch, usize),
     Episode(MediaFile),
+}
+
+/// Width of a person on the results page (their photo, with room for the name under it).
+const PERSON_TILE_W: f32 = 136.;
+
+/// "Actor · 4 titles", "Director · 1 title", "Actor & Director · 3 titles".
+fn person_caption(person: &PersonMatch, titles: usize) -> String {
+    let mut roles: Vec<&str> = Vec::new();
+    if person.acts {
+        roles.push("Actor");
+    }
+    roles.extend(person.jobs.iter().map(String::as_str));
+    let count = match titles {
+        1 => "1 title".to_string(),
+        n => format!("{n} titles"),
+    };
+    if roles.is_empty() {
+        count
+    } else {
+        format!("{} · {count}", roles.join(" & "))
+    }
 }
