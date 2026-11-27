@@ -151,6 +151,7 @@ gpui::actions!(
         GoForward,
         ToggleSidebar,
         OpenSearch,
+        FindInPage,
         GoHome,
         GoMovies,
         GoShows
@@ -167,7 +168,7 @@ pub fn key_bindings() -> Vec<gpui::KeyBinding> {
         KeyBinding::new("alt-right", GoForward, None),
         KeyBinding::new("ctrl-b", ToggleSidebar, None),
         KeyBinding::new("ctrl-k", OpenSearch, None),
-        KeyBinding::new("ctrl-f", OpenSearch, None),
+        KeyBinding::new("ctrl-f", FindInPage, None),
         KeyBinding::new("ctrl-1", GoHome, None),
         KeyBinding::new("ctrl-2", GoMovies, None),
         KeyBinding::new("ctrl-3", GoShows, None),
@@ -329,6 +330,9 @@ pub struct LibraryView {
     /// landed on. It stays highlighted until the page is scrolled away from there (near the
     /// bottom several short sections fit on screen, so position alone can't tell which).
     settings_jump: Option<(usize, gpui::Pixels)>,
+    /// The Settings page's own search field, which filters its rows as you type.
+    settings_search: crate::text_edit::TextEdit,
+    settings_search_focus: FocusHandle,
     /// Titles chosen in a grid to change together (see select.rs), and its "Add to
     /// collection" menu: open, and when it last closed.
     selection: Option<select::Selection>,
@@ -523,6 +527,8 @@ impl LibraryView {
             genre_menu_closed: Instant::now(),
             last_surprise: None,
             settings_jump: None,
+            settings_search: crate::text_edit::TextEdit::new(""),
+            settings_search_focus: cx.focus_handle(),
             selection: None,
             bulk_menu: false,
             bulk_menu_closed: Instant::now(),
@@ -1789,6 +1795,16 @@ impl Render for LibraryView {
             .on_action(cx.listener(|this, _: &GoForward, _, cx| this.go_forward(cx)))
             .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| this.toggle_sidebar(cx)))
             .on_action(cx.listener(|this, _: &OpenSearch, _, cx| this.open_search(cx)))
+            // Ctrl+F finds a setting on the Settings page, and searches the library elsewhere.
+            .on_action(cx.listener(|this, _: &FindInPage, window, cx| {
+                if matches!(this.page, Page::Settings) {
+                    this.settings_search.select_all();
+                    window.focus(&this.settings_search_focus, cx);
+                    cx.notify();
+                } else {
+                    this.open_search(cx);
+                }
+            }))
             .on_action(cx.listener(|this, _: &GoHome, _, cx| this.set_tab(Tab::Home, cx)))
             .on_action(cx.listener(|this, _: &GoMovies, _, cx| this.set_tab(Tab::Movies, cx)))
             .on_action(cx.listener(|this, _: &GoShows, _, cx| this.set_tab(Tab::Shows, cx)))

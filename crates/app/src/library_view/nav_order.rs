@@ -145,7 +145,7 @@ impl LibraryView {
     }
 
     /// The reorderable list of sidebar destinations.
-    pub(super) fn sidebar_order_rows(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    pub(super) fn sidebar_order_rows(&self, cx: &mut Context<Self>) -> Vec<SettingsRow> {
         let order = &self.settings.sidebar_order;
         let dragging = self.nav_drag.as_ref().map(|d| d.from);
         let row = |ix: usize, item: NavItem, lifted: bool, cx: &mut Context<Self>| {
@@ -231,14 +231,19 @@ impl LibraryView {
                     .child(row(from, item, true, cx)),
             )
         });
-        vec![
+        // One row, so dragging can rely on the list's own positions; found by any destination.
+        let words = std::iter::once("order reorder")
+            .chain(order.iter().map(|item| item.label()))
+            .collect::<Vec<_>>()
+            .join(" ");
+        vec![SettingsRow::new(
+            words,
             div()
                 .relative()
                 .flex()
                 .flex_col()
                 .children(rows)
-                .children(lifted)
-                .into_any_element(),
-        ]
+                .children(lifted),
+        )]
     }
 }

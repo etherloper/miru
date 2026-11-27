@@ -177,7 +177,7 @@ impl LibraryView {
         }
     }
 
-    pub(super) fn backup_rows(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    pub(super) fn backup_rows(&self, cx: &mut Context<Self>) -> Vec<SettingsRow> {
         let export = theme::compact_button(
             "backup-export",
             Some("icons/download.svg"),
@@ -198,8 +198,7 @@ impl LibraryView {
                      Your TMDB key isn't included.",
                 ),
                 Some(export.into_any_element()),
-            )
-            .into_any_element(),
+            ),
             setting_row(
                 "Restore",
                 Some(
@@ -207,11 +206,10 @@ impl LibraryView {
                      is matched to the videos already here.",
                 ),
                 Some(import.into_any_element()),
-            )
-            .into_any_element(),
+            ),
         ];
         if let Some((text, failed)) = &self.backup_status {
-            rows.push(
+            rows.push(SettingsRow::plain(
                 div()
                     .px_5()
                     .py_3()
@@ -221,9 +219,8 @@ impl LibraryView {
                     } else {
                         theme::text_secondary()
                     })
-                    .child(text.clone())
-                    .into_any_element(),
-            );
+                    .child(text.clone()),
+            ));
         }
         rows
     }

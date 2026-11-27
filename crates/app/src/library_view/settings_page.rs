@@ -153,20 +153,22 @@ impl LibraryView {
         );
 
         // Library folders.
-        let mut folders: Vec<AnyElement> = self
+        let mut folders: Vec<SettingsRow> = self
             .roots
             .iter()
-            .map(|stats| self.folder_row(stats, cx))
+            .map(|stats| {
+                SettingsRow::new(
+                    format!("folder {}", stats.root.path),
+                    self.folder_row(stats, cx),
+                )
+            })
             .collect();
         if folders.is_empty() {
-            folders.push(
-                setting_row(
-                    "No folders yet",
-                    Some("Add a folder of movies or TV shows to build your library."),
-                    None,
-                )
-                .into_any_element(),
-            );
+            folders.push(setting_row(
+                "No folders yet",
+                Some("Add a folder of movies or TV shows to build your library."),
+                None,
+            ));
         }
         let library_actions = div()
             .flex()
@@ -302,14 +304,12 @@ impl LibraryView {
                 "Skip interval",
                 Some("How far the skip buttons and arrow keys jump."),
                 Some(seek.into_any_element()),
-            )
-            .into_any_element(),
+            ),
             setting_row(
                 "Autoplay next episode",
                 Some("Start the next episode after a short countdown when one finishes."),
                 Some(autoplay.into_any_element()),
-            )
-            .into_any_element(),
+            ),
             stacked_row(
                 "Audio output",
                 "Stereo keeps dialogue clear on headphones and TV speakers. Source and 7.1 are for \
@@ -328,8 +328,7 @@ impl LibraryView {
                 "Subtitles",
                 Some("Turn subtitles on automatically when a file has them."),
                 Some(subtitles.into_any_element()),
-            )
-            .into_any_element(),
+            ),
             stacked_row(
                 "Preferred language",
                 "Picked automatically when subtitles are on.",
@@ -345,22 +344,24 @@ impl LibraryView {
                 "How subtitles stand out from the picture.",
                 div().flex().child(subtitle_style).into_any_element(),
             ),
-            setting_row("Colour", None, Some(subtitle_color.into_any_element())).into_any_element(),
-            subtitle_preview(s.subtitle_size, s.subtitle_style, s.subtitle_color),
+            setting_row("Colour", None, Some(subtitle_color.into_any_element())),
+            SettingsRow::plain(subtitle_preview(
+                s.subtitle_size,
+                s.subtitle_style,
+                s.subtitle_color,
+            )),
         ];
         let home_rows = vec![
             setting_row(
                 "Rotate featured titles",
                 Some("Cycle the large banner on Home every few seconds."),
                 Some(rotate.into_any_element()),
-            )
-            .into_any_element(),
+            ),
             setting_row(
                 "Feature the whole library",
                 Some("Pick featured titles from everything in your library, not just what was added recently."),
                 Some(whole_library.into_any_element()),
-            )
-            .into_any_element(),
+            ),
         ];
         let sidebar_rows = self.sidebar_order_rows(cx);
         let history_rows = self.history_rows(cx);
@@ -368,9 +369,12 @@ impl LibraryView {
         let metadata_rows = self.metadata_rows(window, cx);
         let ratings_rows = self.ratings_rows(window, cx);
         let about_rows = self.about_rows(cx);
-        folders.push(library_actions.into_any_element());
+        folders.push(SettingsRow::new(
+            "Add Folder Scan Now rescan",
+            library_actions,
+        ));
 
-        let sections: Vec<(&'static str, &'static str, Vec<AnyElement>)> = vec![
+        let sections: Vec<(&'static str, &'static str, Vec<SettingsRow>)> = vec![
             (
                 "Library",
                 "Folders Miru scans for movies and TV shows. Files are never modified.",
@@ -416,6 +420,8 @@ impl LibraryView {
             ),
             ("About", "", about_rows),
         ];
+        let query = self.settings_search.text().trim().to_string();
+        let sections = filter_settings(sections, &query);
 
         // The contents list only appears when there's room for it beside full-width cards.
         let width = match self.detail_scroll.bounds().size.width {
@@ -433,10 +439,41 @@ impl LibraryView {
             .h(px(SETTINGS_TITLE_H))
             .flex()
             .items_center()
-            .font_family(theme::FONT_DISPLAY)
-            .text_size(px(40.))
-            .font_weight(FontWeight::BOLD)
-            .child("Settings");
+            .gap_4()
+            .child(
+                div()
+                    .flex_1()
+                    .font_family(theme::FONT_DISPLAY)
+                    .text_size(px(40.))
+                    .font_weight(FontWeight::BOLD)
+                    .child("Settings"),
+            )
+            // Without room for the contents list, the search field sits beside the title.
+            .when(!with_nav, |d| d.child(self.settings_search_field(false, window, cx)));
+        let no_results = (sections.is_empty()).then(|| {
+            settings_column(
+                with_nav,
+                None,
+                div()
+                    .py_12()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap_2()
+                    .child(icon("icons/search.svg", 28., theme::text_tertiary()))
+                    .child(
+                        div()
+                            .font_weight(FontWeight::MEDIUM)
+                            .child(format!("No settings match “{query}”")),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(theme::text_secondary())
+                            .child("Try a different word, like subtitles, language or key."),
+                    ),
+            )
+        });
         let page = div()
             .id("settings-page")
             .size_full()
@@ -449,6 +486,7 @@ impl LibraryView {
             .children(sections.into_iter().map(|(title, description, rows)| {
                 settings_column(with_nav, None, section(title, description, rows))
             }))
+            .children(no_results)
             // Bottom padding (padding on the scroll view itself would scroll with the offset).
             .child(div().h(px(64. - SETTINGS_SECTION_GAP)).flex_shrink_0());
 
@@ -456,12 +494,27 @@ impl LibraryView {
             .relative()
             .size_full()
             .child(page)
+            // The search field heads the contents list, level with the title, and stays put
+            // while the page scrolls.
             .when(with_nav, |d| {
-                let nav = self.settings_nav(&titles, active, cx);
+                let nav = div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(SETTINGS_SECTION_GAP))
+                    .child(
+                        div()
+                            .h(px(SETTINGS_TITLE_H))
+                            .flex()
+                            .items_center()
+                            .child(self.settings_search_field(true, window, cx)),
+                    )
+                    .when(!titles.is_empty(), |d| {
+                        d.child(self.settings_nav(&titles, active, cx))
+                    });
                 d.child(
                     div()
                         .absolute()
-                        .top(px(SETTINGS_TOP + SETTINGS_TITLE_H + SETTINGS_SECTION_GAP))
+                        .top(px(SETTINGS_TOP))
                         .left_0()
                         .w_full()
                         .child(settings_column(true, Some(nav), div())),
@@ -555,6 +608,115 @@ impl LibraryView {
             }))
     }
 
+    /// The field beside the "Settings" title that filters the page as you type.
+    /// `in_nav`: filling the contents list's column rather than beside the title.
+    fn settings_search_field(
+        &self,
+        in_nav: bool,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let focused = self.settings_search_focus.is_focused(window);
+        let has_text = !self.settings_search.text().is_empty();
+        crate::text_edit::mouse_handlers(
+            div()
+                .id("settings-search")
+                .track_focus(&self.settings_search_focus)
+                .on_key_down(cx.listener(Self::on_settings_search_key))
+                .when(in_nav, |d| d.w_full())
+                .when(!in_nav, |d| d.w(px(260.)).flex_shrink_1().min_w(px(140.)))
+                .h(px(36.))
+                .pl_3()
+                .pr_1()
+                .flex()
+                .items_center()
+                .gap_2()
+                .rounded_full()
+                .bg(rgba(0xffffff0d))
+                .border_1()
+                .border_color(if focused {
+                    rgba(0xffffff4d)
+                } else {
+                    theme::glass_border()
+                })
+                .text_sm()
+                .cursor_text()
+                .child(icon("icons/search.svg", 15., theme::text_tertiary()))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .overflow_hidden()
+                        .child(self.settings_search.element(
+                            "Find a setting",
+                            theme::text(),
+                            theme::text_tertiary(),
+                            focused,
+                        )),
+                )
+                .when(has_text, |d| {
+                    d.child(
+                        div()
+                            .id("settings-search-clear")
+                            .size(px(26.))
+                            .flex_shrink_0()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded_full()
+                            .cursor_pointer()
+                            .hover(|s| s.bg(rgba(0xffffff14)))
+                            .child(icon("icons/window-close.svg", 12., theme::text_secondary()))
+                            .tooltip(theme::text_tooltip("Clear"))
+                            .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
+                                cx.stop_propagation()
+                            })
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.set_settings_query("", cx);
+                            })),
+                    )
+                }),
+            &self.settings_search_focus,
+            |this: &mut Self| Some(&mut this.settings_search),
+            cx,
+        )
+        .into_any_element()
+    }
+
+    fn on_settings_search_key(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let k = &event.keystroke;
+        match k.key.as_str() {
+            // Esc clears the search, then leaves the field.
+            "escape" if !self.settings_search.text().is_empty() => self.set_settings_query("", cx),
+            "escape" | "enter" => window.focus(&self.focus, cx),
+            _ => match self.settings_search.handle_key(k, cx) {
+                crate::text_edit::KeyOutcome::Changed => self.settings_query_changed(cx),
+                crate::text_edit::KeyOutcome::Moved => {}
+                crate::text_edit::KeyOutcome::Unhandled => return,
+            },
+        }
+        cx.stop_propagation();
+        cx.notify();
+    }
+
+    fn set_settings_query(&mut self, query: &str, cx: &mut Context<Self>) {
+        self.settings_search.set_text(query);
+        self.settings_query_changed(cx);
+    }
+
+    /// Back to the top, where the first match is, whenever the results change.
+    fn settings_query_changed(&mut self, cx: &mut Context<Self>) {
+        let offset = self.detail_scroll.offset();
+        self.detail_scroll.set_offset(gpui::point(offset.x, px(0.)));
+        self.settings_jump = None;
+        cx.notify();
+    }
+
     pub(super) fn clear_history(&mut self, cx: &mut Context<Self>) {
         self.confirm_clear_history = false;
         if let Err(e) = self.db.clear_history() {
@@ -565,17 +727,14 @@ impl LibraryView {
 
     /// Watch History, one row per title: a show's episodes collapse into one row showing the
     /// latest. The most recent few show at first; the rest are a click away.
-    pub(super) fn history_rows(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
-        let mut rows: Vec<AnyElement> = Vec::new();
+    pub(super) fn history_rows(&self, cx: &mut Context<Self>) -> Vec<SettingsRow> {
+        let mut rows: Vec<SettingsRow> = Vec::new();
         if self.history.is_empty() {
-            rows.push(
-                setting_row(
-                    "Nothing watched yet",
-                    Some("Movies and episodes you play appear here."),
-                    None,
-                )
-                .into_any_element(),
-            );
+            rows.push(setting_row(
+                "Nothing watched yet",
+                Some("Movies and episodes you play appear here."),
+                None,
+            ));
             return rows;
         }
 
@@ -671,7 +830,8 @@ impl LibraryView {
                 ));
             let ids = group.file_ids.clone();
             let key = group.item.as_ref().map(|i| i.key.clone());
-            rows.push(
+            rows.push(SettingsRow::new(
+                group.title.clone(),
                 div()
                     .id(("history-row", ix))
                     .flex()
@@ -724,13 +884,12 @@ impl LibraryView {
                             }),
                         )
                         .tooltip(theme::text_tooltip("Remove from history")),
-                    )
-                    .into_any_element(),
-            );
+                    ),
+            ));
         }
         if total > HISTORY_PREVIEW {
             let expanded = self.history_expanded;
-            rows.push(
+            rows.push(SettingsRow::plain(
                 div()
                     .id("history-more")
                     .h(px(44.))
@@ -753,9 +912,8 @@ impl LibraryView {
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.history_expanded ^= true;
                         cx.notify();
-                    }))
-                    .into_any_element(),
-            );
+                    })),
+            ));
         }
 
         let footer: AnyElement = if self.confirm_clear_history {
@@ -798,7 +956,8 @@ impl LibraryView {
             )
             .into_any_element()
         };
-        rows.push(
+        rows.push(SettingsRow::new(
+            "Clear Watch History",
             div()
                 .flex()
                 .items_center()
@@ -816,9 +975,8 @@ impl LibraryView {
                             format!("{total} titles")
                         }),
                 )
-                .child(footer)
-                .into_any_element(),
-        );
+                .child(footer),
+        ));
         rows
     }
 
@@ -1075,13 +1233,66 @@ fn subtitle_preview(size: SubtitleSize, style: SubtitleStyle, color: SubtitleCol
         .into_any_element()
 }
 
+/// A row of a settings card and the words the settings search finds it by. Rows with no words
+/// (previews, buttons under a list, spacers) show whenever their section does.
+pub(super) struct SettingsRow {
+    words: String,
+    element: AnyElement,
+}
+
+impl SettingsRow {
+    pub(super) fn new(words: impl Into<String>, element: impl IntoElement) -> Self {
+        Self {
+            words: words.into().to_lowercase(),
+            element: element.into_any_element(),
+        }
+    }
+
+    pub(super) fn plain(element: impl IntoElement) -> Self {
+        Self::new(String::new(), element)
+    }
+}
+
+/// The sections and rows matching a settings search. Every word of the query has to appear in
+/// the section's title or the row's words; a query that names a section keeps all of it.
+fn filter_settings(
+    sections: Vec<(&'static str, &'static str, Vec<SettingsRow>)>,
+    query: &str,
+) -> Vec<(&'static str, &'static str, Vec<AnyElement>)> {
+    let query = query.to_lowercase();
+    let words: Vec<&str> = query.split_whitespace().collect();
+    sections
+        .into_iter()
+        .filter_map(|(title, description, rows)| {
+            let title_lower = title.to_lowercase();
+            let whole = words.iter().all(|w| title_lower.contains(w));
+            let matches = |row: &SettingsRow| {
+                !row.words.is_empty()
+                    && words
+                        .iter()
+                        .all(|w| title_lower.contains(w) || row.words.contains(w))
+            };
+            if !whole && !rows.iter().any(matches) {
+                return None;
+            }
+            let rows = rows
+                .into_iter()
+                .filter(|row| whole || row.words.is_empty() || matches(row))
+                .map(|row| row.element)
+                .collect();
+            Some((title, description, rows))
+        })
+        .collect()
+}
+
 /// Label and description on the left, control on the right.
 pub(super) fn setting_row(
     label: &str,
     description: Option<&str>,
     control: Option<AnyElement>,
-) -> impl IntoElement {
-    div()
+) -> SettingsRow {
+    let words = format!("{label} {}", description.unwrap_or_default());
+    let element = div()
         .flex()
         .items_center()
         .gap_6()
@@ -1108,12 +1319,13 @@ pub(super) fn setting_row(
                         .child(d.to_string())
                 })),
         )
-        .children(control)
+        .children(control);
+    SettingsRow::new(words, element)
 }
 
 /// Label and description with a wide control underneath.
-pub(super) fn stacked_row(label: &str, description: &str, control: AnyElement) -> AnyElement {
-    div()
+pub(super) fn stacked_row(label: &str, description: &str, control: AnyElement) -> SettingsRow {
+    let element = div()
         .flex()
         .flex_col()
         .gap_3()
@@ -1138,8 +1350,8 @@ pub(super) fn stacked_row(label: &str, description: &str, control: AnyElement) -
                         .child(description.to_string()),
                 ),
         )
-        .child(control)
-        .into_any_element()
+        .child(control);
+    SettingsRow::new(format!("{label} {description}"), element)
 }
 
 type IndexHandler = dyn Fn(&usize, &mut Window, &mut gpui::App);
@@ -1277,6 +1489,7 @@ const SHORTCUTS: [(&str, &[Shortcut]); 3] = [
         "Library",
         &[
             ("Search", &["Ctrl+K", "Ctrl+F"]),
+            ("Find a setting (on this page)", &["Ctrl+F"]),
             ("Home, Movies, TV Shows", &["Ctrl+1", "Ctrl+2", "Ctrl+3"]),
             ("Collapse or expand the sidebar", &["Ctrl+B"]),
             ("Back", &["Alt+←", "Backspace", "Esc"]),
@@ -1335,10 +1548,18 @@ fn key_combo(combo: &str) -> AnyElement {
 }
 
 /// Rows for the Keyboard shortcuts section: a small heading per area, then one row per action.
-pub(super) fn shortcut_rows() -> Vec<AnyElement> {
+pub(super) fn shortcut_rows() -> Vec<SettingsRow> {
     let mut rows = Vec::new();
     for (area, shortcuts) in SHORTCUTS {
-        rows.push(
+        // The heading is found by any of its shortcuts, so a match never loses its context.
+        let heading_words = std::iter::once(area)
+            .chain(shortcuts.iter().flat_map(|(action, keys)| {
+                std::iter::once(*action).chain(keys.iter().copied())
+            }))
+            .collect::<Vec<_>>()
+            .join(" ");
+        rows.push(SettingsRow::new(
+            heading_words,
             div()
                 .px_5()
                 .pt_4()
@@ -1346,11 +1567,11 @@ pub(super) fn shortcut_rows() -> Vec<AnyElement> {
                 .text_xs()
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(theme::text_tertiary())
-                .child(area)
-                .into_any_element(),
-        );
+                .child(area),
+        ));
         for (action, keys) in shortcuts {
-            rows.push(
+            rows.push(SettingsRow::new(
+                format!("{area} {action} {}", keys.join(" ")),
                 div()
                     .flex()
                     .items_center()
@@ -1366,12 +1587,11 @@ pub(super) fn shortcut_rows() -> Vec<AnyElement> {
                             .items_center()
                             .gap_2()
                             .children(keys.iter().map(|k| key_combo(k))),
-                    )
-                    .into_any_element(),
-            );
+                    ),
+            ));
         }
     }
-    rows.push(div().h(px(12.)).into_any_element());
+    rows.push(SettingsRow::plain(div().h(px(12.))));
     rows
 }
 
@@ -1404,5 +1624,48 @@ fn played_ago(ms: i64) -> String {
                 format!("{months} months ago")
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn row(words: &str) -> SettingsRow {
+        if words.is_empty() {
+            SettingsRow::plain(div())
+        } else {
+            SettingsRow::new(words, div())
+        }
+    }
+
+    fn shown(query: &str) -> Vec<(&'static str, usize)> {
+        let sections = vec![
+            (
+                "Playback",
+                "",
+                vec![row("Skip interval"), row("Preferred audio language")],
+            ),
+            (
+                "Subtitles",
+                "",
+                vec![row("Preferred language"), row("Size"), row("")],
+            ),
+        ];
+        filter_settings(sections, query)
+            .into_iter()
+            .map(|(title, _, rows)| (title, rows.len()))
+            .collect()
+    }
+
+    #[test]
+    fn settings_search_keeps_matching_rows_and_whole_named_sections() {
+        assert_eq!(shown(""), [("Playback", 2), ("Subtitles", 3)]);
+        // Rows match in every section; a section's untitled rows (the preview) come along.
+        assert_eq!(shown("language"), [("Playback", 1), ("Subtitles", 2)]);
+        // The section's title counts towards each of its rows.
+        assert_eq!(shown("subtitle size"), [("Subtitles", 2)]);
+        assert_eq!(shown("SUBTITLES"), [("Subtitles", 3)]);
+        assert_eq!(shown("nothing like this"), []);
     }
 }

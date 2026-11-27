@@ -136,7 +136,7 @@ impl LibraryView {
     }
 
     /// Rows for the Metadata section: the TMDB key (where it comes from, or your own).
-    pub(super) fn metadata_rows(&self, window: &Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    pub(super) fn metadata_rows(&self, window: &Window, cx: &mut Context<Self>) -> Vec<SettingsRow> {
         let tmdb_description = match self.tmdb_source {
             Some(KeySource::Settings) => "Using the key you added.",
             Some(KeySource::Environment) => "Using the key from your .env file.",
@@ -150,8 +150,7 @@ impl LibraryView {
                 "TMDB key",
                 Some(tmdb_description),
                 Some(self.key_control(KeyKind::Tmdb, window, cx)),
-            )
-            .into_any_element(),
+            ),
         ]
     }
 
@@ -432,7 +431,7 @@ impl LibraryView {
 
     /// The About card: the app with its version, the update status, and links, in a compact
     /// layout (header, update row, auto-check, links and small print).
-    pub(super) fn about_rows(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    pub(super) fn about_rows(&self, cx: &mut Context<Self>) -> Vec<SettingsRow> {
         let header = div()
             .flex()
             .items_center()
@@ -489,23 +488,26 @@ impl LibraryView {
                     ),
             );
 
-        let mut rows = vec![header.into_any_element(), self.update_status_row(cx)];
+        let mut rows = vec![
+            SettingsRow::new("Miru version", header),
+            SettingsRow::new("update check for updates version", self.update_status_row(cx)),
+        ];
         if updates::UPDATE_REPO.is_some() {
             let auto = toggle(
                 "update-auto",
                 self.settings.auto_update,
                 cx.listener(|this, _, _, cx| this.update_settings(|s| s.auto_update ^= true, cx)),
             );
-            rows.push(
+            rows.push(SettingsRow::new(
+                "Check automatically for updates every time Miru starts",
                 compact_row(
                     "Check automatically",
                     "Every time Miru starts.",
                     Some(auto.into_any_element()),
-                )
-                .into_any_element(),
-            );
+                ),
+            ));
         }
-        rows.push(self.about_links());
+        rows.push(SettingsRow::plain(self.about_links()));
         rows
     }
 

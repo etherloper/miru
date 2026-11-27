@@ -201,7 +201,7 @@ impl LibraryView {
     }
 
     /// Settings → Ratings: the MDBList key, then a switch for each site.
-    pub(super) fn ratings_rows(&self, window: &Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    pub(super) fn ratings_rows(&self, window: &Window, cx: &mut Context<Self>) -> Vec<SettingsRow> {
         let description = if self.settings.mdblist_key.is_some() {
             "Showing ratings from the sites below on movie and show pages."
         } else {
@@ -213,8 +213,7 @@ impl LibraryView {
                 "MDBList key",
                 Some(description),
                 Some(self.key_control(about::KeyKind::Mdblist, window, cx)),
-            )
-            .into_any_element(),
+            ),
         ];
         rows.extend(RATING_SITES.iter().enumerate().map(|(ix, site)| {
             let on = self.settings.rating_sources.iter().any(|s| s == site.id);
@@ -233,7 +232,6 @@ impl LibraryView {
                         .into_any_element(),
                 ),
             )
-            .into_any_element()
         }));
         rows
     }
