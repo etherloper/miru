@@ -388,6 +388,15 @@ pub fn danger() -> Rgba {
     rgb(0xff5c5c)
 }
 
+/// Good news, such as an update being available.
+pub fn success() -> Rgba {
+    rgb(0x4ade80)
+}
+/// `success`, brighter, for hover.
+pub fn success_hover() -> Rgba {
+    rgb(0x86efac)
+}
+
 /// An icon button whose icon takes `hover` colour while hovered (e.g. red for a bin).
 pub fn tinted_icon_button(
     id: impl Into<gpui::ElementId>,
@@ -397,15 +406,29 @@ pub fn tinted_icon_button(
     hover: Rgba,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> Stateful<Div> {
+    let rest = if enabled {
+        text_secondary()
+    } else {
+        text_tertiary()
+    };
+    colored_icon_button(id, icon_path, size, enabled, rest, hover, on_click)
+}
+
+/// An icon button drawn in `rest` colour, taking `hover` colour while hovered.
+pub fn colored_icon_button(
+    id: impl Into<gpui::ElementId>,
+    icon_path: &'static str,
+    size: f32,
+    enabled: bool,
+    rest: Rgba,
+    hover: Rgba,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> Stateful<Div> {
     let glyph = svg()
         .path(icon_path)
         .size(px(size * 0.5))
         .flex_shrink_0()
-        .text_color(if enabled {
-            text_secondary()
-        } else {
-            text_tertiary()
-        })
+        .text_color(rest)
         // Hovering brightens the icon; there is no background.
         .when(enabled, |s| {
             s.group_hover(ICON_BUTTON_GROUP, move |s| s.text_color(hover))

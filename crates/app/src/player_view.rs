@@ -42,6 +42,65 @@ const COVER_FADE: Duration = Duration::from_millis(220);
 const UP_NEXT_COUNTDOWN: Duration = Duration::from_secs(10);
 /// How often the position shown by the system media controls is refreshed.
 const MEDIA_STATE_INTERVAL: Duration = Duration::from_secs(5);
+/// Holding the button this long at either edge of the picture fast-forwards or rewinds.
+const HOLD_DELAY: Duration = Duration::from_millis(300);
+/// The share of the picture's width at each side that responds to a hold.
+const HOLD_ZONE: f32 = 0.2;
+/// Speed while held: forward plays at this rate, rewind steps back at it.
+const HOLD_SPEED: f64 = 2.0;
+/// Rewinding is done in small exact seeks (mpv can't play backwards smoothly) this often.
+const REWIND_TICK: Duration = Duration::from_millis(200);
+
+/// What the time at the right of the seek bar shows. Kept for the rest of the session, so the
+/// next video shows the same.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TimeEnd {
+    Remaining,
+    Total,
+    EndsAt,
+}
+
+static TIME_END: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+impl TimeEnd {
+    fn current() -> Self {
+        match TIME_END.load(std::sync::atomic::Ordering::Relaxed) {
+            1 => Self::Total,
+            2 => Self::EndsAt,
+            _ => Self::Remaining,
+        }
+    }
+
+    fn store(self) {
+        TIME_END.store(self as u8, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    fn next(self) -> Self {
+        match self {
+            Self::Remaining => Self::Total,
+            Self::Total => Self::EndsAt,
+            Self::EndsAt => Self::Remaining,
+        }
+    }
+}
+
+/// Which edge of the picture is being held.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HoldSide {
+    Rewind,
+    Forward,
+}
+
+/// A press at an edge of the picture: once it has lasted `HOLD_DELAY` it becomes `active`.
+#[derive(Debug, Clone, Copy)]
+struct Hold {
+    side: HoldSide,
+    /// Tells this press's timer apart from a later one's.
+    epoch: usize,
+    active: bool,
+    /// Restored on release (rewinding pauses; fast-forward plays).
+    was_paused: bool,
+}
 
 /// What to play and where to start.
 #[derive(Clone, PartialEq)]
@@ -130,6 +189,8 @@ pub struct PlayerView {
     seek_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     /// Screen bounds of the volume slider, for click and drag.
     volume_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
+    /// Screen bounds of the speed slider in the menu.
+    speed_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     /// When the volume last changed, for the brief on-screen indicator.
     volume_changed_at: Instant,
     /// Wheel input turned into 5% volume steps.
@@ -179,6 +240,13 @@ pub struct PlayerView {
     /// When mpv's video output came up; the black cover fades out shortly after.
     video_ready_at: Option<Instant>,
     error: Option<SharedString>,
+    /// Playback speed picked in the menu (1.0 = normal).
+    speed: f64,
+    /// A press held at an edge of the picture (see `start_hold`).
+    hold: Option<Hold>,
+    hold_epoch: usize,
+    /// When an active hold ended: its release mustn't count towards a double-click.
+    hold_ended_at: Option<Instant>,
 }
 
 impl EventEmitter<PlayerEvent> for PlayerView {}
@@ -239,6 +307,7 @@ impl PlayerView {
             audio_output: None,
             seek_bounds: Rc::default(),
             volume_bounds: Rc::default(),
+            speed_bounds: Rc::default(),
             volume_changed_at: Instant::now() - Duration::from_secs(60),
             wheel: Default::default(),
             chapters: Vec::new(),
@@ -270,6 +339,10 @@ impl PlayerView {
             window_hovered: window.is_window_hovered(),
             video_ready_at: None,
             error,
+            speed: 1.0,
+            hold: None,
+            hold_epoch: 0,
+            hold_ended_at: None,
         }
     }
 
@@ -569,6 +642,164 @@ impl PlayerView {
         }
     }
 
+    fn set_speed(&mut self, speed: f64, cx: &mut Context<Self>) {
+        // Snapped to the slider's steps, so nudges land on round values (1.05, not 1.0500001).
+        let steps = ((speed - menu::SPEED_MIN) / menu::SPEED_STEP).round();
+        let speed =
+            (menu::SPEED_MIN + steps * menu::SPEED_STEP).clamp(menu::SPEED_MIN, menu::SPEED_MAX);
+        let speed = (speed * 100.).round() / 100.;
+        self.speed = speed;
+        // A hold in progress keeps its own speed; the new one applies on release.
+        if self.hold.is_some_and(|h| h.active) {
+            return;
+        }
+        self.run(|p| p.set_speed(speed), cx);
+    }
+
+    /// A press on the picture. At its left or right edge, holding it rewinds or fast-forwards
+    /// at `HOLD_SPEED` until the button is released.
+    fn start_hold(&mut self, x: Pixels, window: &Window, cx: &mut Context<Self>) {
+        let width = window.viewport_size().width;
+        if self.menu.is_some() || width <= px(0.) || self.state.duration <= 0. {
+            return;
+        }
+        let at = x / width;
+        let side = if at < HOLD_ZONE {
+            HoldSide::Rewind
+        } else if at > 1. - HOLD_ZONE {
+            HoldSide::Forward
+        } else {
+            return;
+        };
+        self.hold_epoch += 1;
+        let epoch = self.hold_epoch;
+        self.hold = Some(Hold {
+            side,
+            epoch,
+            active: false,
+            was_paused: self.state.paused,
+        });
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(HOLD_DELAY).await;
+            let rewinding = this.update(cx, |view, cx| view.activate_hold(epoch, cx));
+            if !matches!(rewinding, Ok(true)) {
+                return;
+            }
+            loop {
+                cx.background_executor().timer(REWIND_TICK).await;
+                if !matches!(this.update(cx, |view, _| view.rewind_step(epoch)), Ok(true)) {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    /// The press has lasted long enough: start fast-forwarding or rewinding. Returns whether
+    /// it is a rewind (which then steps back on a timer).
+    fn activate_hold(&mut self, epoch: usize, cx: &mut Context<Self>) -> bool {
+        let Some(hold) = self.hold.as_mut().filter(|h| h.epoch == epoch) else {
+            return false;
+        };
+        hold.active = true;
+        let side = hold.side;
+        let player = &self.session.player;
+        let result = match side {
+            HoldSide::Forward => player
+                .set_speed(HOLD_SPEED)
+                .and_then(|()| player.set_paused(false)),
+            // Paused, so each step shows its frame instead of playing forward again.
+            HoldSide::Rewind => player.set_paused(true),
+        };
+        if let Err(e) = result {
+            self.error = Some(e.to_string().into());
+        }
+        cx.notify();
+        side == HoldSide::Rewind
+    }
+
+    /// One step of a rewind; returns whether to keep going.
+    fn rewind_step(&mut self, epoch: usize) -> bool {
+        if !self
+            .hold
+            .is_some_and(|h| h.epoch == epoch && h.active && h.side == HoldSide::Rewind)
+        {
+            return false;
+        }
+        if self.state.position > 0. {
+            let step = REWIND_TICK.as_secs_f64() * HOLD_SPEED;
+            if let Err(e) = self.session.player.seek_relative_exact(-step) {
+                tracing::warn!("cannot rewind: {e}");
+            }
+        }
+        true
+    }
+
+    /// The button was released (or found up): back to the chosen speed and play state.
+    fn end_hold(&mut self, cx: &mut Context<Self>) {
+        let Some(hold) = self.hold.take() else {
+            return;
+        };
+        if !hold.active {
+            return;
+        }
+        self.hold_ended_at = Some(Instant::now());
+        let player = &self.session.player;
+        let result = match hold.side {
+            HoldSide::Forward => player.set_speed(self.speed),
+            HoldSide::Rewind => Ok(()),
+        }
+        .and_then(|()| player.set_paused(hold.was_paused));
+        if let Err(e) = result {
+            self.error = Some(e.to_string().into());
+        }
+        cx.notify();
+    }
+
+    /// "2×" with the direction, while a hold is fast-forwarding or rewinding.
+    fn render_hold_osd(&self) -> Option<impl IntoElement> {
+        let hold = self.hold.filter(|h| h.active)?;
+        let icon_path = match hold.side {
+            HoldSide::Rewind => "icons/rewind.svg",
+            HoldSide::Forward => "icons/fast-forward.svg",
+        };
+        let label = div()
+            .text_sm()
+            .font_weight(FontWeight::SEMIBOLD)
+            .child(format!("{}×", HOLD_SPEED));
+        let glyph = icon(icon_path, 18., theme::text());
+        let pill = div()
+            .h(px(40.))
+            .px_4()
+            .flex()
+            .items_center()
+            .gap_2()
+            .rounded_full()
+            .bg(rgba(0x14141cb3))
+            .border_1()
+            .border_color(rgba(0xffffff33))
+            .shadow(theme::card_shadow(0.5));
+        let pill = match hold.side {
+            HoldSide::Rewind => pill.child(glyph).child(label),
+            HoldSide::Forward => pill.child(label).child(glyph),
+        };
+        Some(
+            div()
+                .absolute()
+                .top(px(96.))
+                .left_0()
+                .right_0()
+                .flex()
+                .justify_center()
+                .child(pill)
+                .with_animation(
+                    ("hold-osd", hold.epoch),
+                    Animation::new(theme::motion(160)).with_easing(gpui::ease_out_quint()),
+                    |el, t| el.opacity(t),
+                ),
+        )
+    }
+
     fn toggle_fullscreen(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         window.toggle_fullscreen();
         self.poke(cx);
@@ -599,7 +830,11 @@ impl PlayerView {
         }
     }
 
-    fn on_mouse_move(&mut self, _: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
+    fn on_mouse_move(&mut self, event: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
+        // The release can happen outside the window, where it isn't reported.
+        if self.hold.is_some() && event.pressed_button != Some(MouseButton::Left) {
+            self.end_hold(cx);
+        }
         self.poke(cx);
     }
 
@@ -1392,8 +1627,41 @@ impl PlayerView {
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(rgba(0xffffffcc))
                     .child(format_time(self.state.position))
-                    .child(format!("-{}", format_time(remaining))),
+                    .child(self.render_time_end(remaining, cx)),
             )
+    }
+
+    /// The right-hand time under the seek bar: remaining, total length, or when it ends.
+    /// Clicking it moves to the next.
+    fn render_time_end(&self, remaining: f64, cx: &mut Context<Self>) -> impl IntoElement {
+        let mode = TimeEnd::current();
+        let (text, next) = match mode {
+            TimeEnd::Remaining => (format!("-{}", format_time(remaining)), "Show total length"),
+            TimeEnd::Total => (format_time(self.state.duration), "Show when it ends"),
+            // At a faster speed it ends sooner than the remaining media time.
+            TimeEnd::EndsAt => (
+                crate::clock::time_in(remaining / self.speed.max(0.1)).map_or_else(
+                    || format!("-{}", format_time(remaining)),
+                    |t| format!("Ends {t}"),
+                ),
+                "Show time remaining",
+            ),
+        };
+        own_press(
+            div()
+                .id("time-end")
+                .px_1p5()
+                .mr(px(-6.))
+                .rounded(px(6.))
+                .cursor_pointer()
+                .hover(|s| s.text_color(theme::text()).bg(rgba(0xffffff14)))
+                .child(text)
+                .tooltip(theme::text_tooltip(next))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    mode.next().store();
+                    this.poke(cx);
+                })),
+        )
     }
 }
 
@@ -1436,10 +1704,12 @@ impl Render for PlayerView {
             .text_color(theme::text())
             .on_key_down(cx.listener(Self::on_key))
             .on_mouse_move(cx.listener(Self::on_mouse_move))
-            // Releasing the button anywhere ends a volume drag (the drawer may then close).
+            // Releasing the button anywhere ends a hold at the edge, and a volume drag (the
+            // drawer may then close).
             .on_mouse_up(
                 MouseButton::Left,
                 cx.listener(|this, _, _, cx| {
+                    this.end_hold(cx);
                     if this.volume_dragging {
                         this.volume_dragging = false;
                         this.update_volume_open(cx);
@@ -1453,15 +1723,26 @@ impl Render for PlayerView {
                 MouseButton::Right,
                 cx.listener(|this, _, _, cx| this.run(Player::toggle_pause, cx)),
             )
-            // Double-clicking the picture toggles fullscreen. Painted first, so the controls
-            // sit above it, and they keep their presses from reaching it (see `own_press`).
+            // Double-clicking the picture toggles fullscreen, and holding at its edges rewinds
+            // or fast-forwards. Painted first, so the controls sit above it, and they keep
+            // their presses from reaching it (see `own_press`).
             .child(
                 div()
                     .id("video-surface")
                     .absolute()
                     .inset_0()
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, event: &MouseDownEvent, window, cx| {
+                            this.start_hold(event.position.x, window, cx);
+                        }),
+                    )
                     .on_click(cx.listener(|this, event: &ClickEvent, window, cx| {
-                        if event.standard_click() && event.click_count() == 2 {
+                        // A press that just ended a hold isn't the first half of a double-click.
+                        let after_hold = this
+                            .hold_ended_at
+                            .is_some_and(|at| at.elapsed() < Duration::from_millis(700));
+                        if event.standard_click() && event.click_count() == 2 && !after_hold {
                             this.toggle_fullscreen(window, cx);
                         }
                     })),
@@ -1529,7 +1810,9 @@ impl Render for PlayerView {
                 move |el, t| el.opacity(if visible { t } else { 1. - t }),
             ));
         }
-        if let Some(osd) = self.render_volume_osd() {
+        if let Some(osd) = self.render_hold_osd() {
+            root = root.child(osd);
+        } else if let Some(osd) = self.render_volume_osd() {
             root = root.child(osd);
         }
         if let Some(card) = self.render_up_next(window, cx) {

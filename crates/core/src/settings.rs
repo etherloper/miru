@@ -66,10 +66,10 @@ impl SubtitleSize {
     /// Multiplier for mpv's `sub-scale`.
     pub fn scale(self) -> f64 {
         match self {
-            Self::Small => 0.8,
-            Self::Medium => 1.0,
-            Self::Large => 1.25,
-            Self::ExtraLarge => 1.5,
+            Self::Small => 0.7,
+            Self::Medium => 0.85,
+            Self::Large => 1.0,
+            Self::ExtraLarge => 1.2,
         }
     }
 
@@ -79,6 +79,80 @@ impl SubtitleSize {
             Self::Medium => "medium",
             Self::Large => "large",
             Self::ExtraLarge => "xl",
+        }
+    }
+
+    fn parse(s: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|v| v.as_str() == s)
+    }
+}
+
+/// How text subtitles are drawn against the picture.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SubtitleStyle {
+    /// A solid dark outline round each letter.
+    #[default]
+    Outline,
+    /// A thin outline and a soft drop shadow.
+    Shadow,
+    /// Text on a translucent dark box.
+    Box,
+}
+
+impl SubtitleStyle {
+    pub const ALL: [Self; 3] = [Self::Outline, Self::Shadow, Self::Box];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Outline => "Outline",
+            Self::Shadow => "Drop Shadow",
+            Self::Box => "Background",
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Outline => "outline",
+            Self::Shadow => "shadow",
+            Self::Box => "box",
+        }
+    }
+
+    fn parse(s: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|v| v.as_str() == s)
+    }
+}
+
+/// Colour of text subtitles.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SubtitleColor {
+    #[default]
+    White,
+    Yellow,
+}
+
+impl SubtitleColor {
+    pub const ALL: [Self; 2] = [Self::White, Self::Yellow];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::White => "White",
+            Self::Yellow => "Yellow",
+        }
+    }
+
+    /// 0xRRGGBB.
+    pub fn rgb(self) -> u32 {
+        match self {
+            Self::White => 0xffffff,
+            Self::Yellow => 0xffe14d,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::White => "white",
+            Self::Yellow => "yellow",
         }
     }
 
@@ -221,6 +295,8 @@ pub struct Settings {
     pub audio_language: Option<String>,
     pub subtitle_language: Option<String>,
     pub subtitle_size: SubtitleSize,
+    pub subtitle_style: SubtitleStyle,
+    pub subtitle_color: SubtitleColor,
     /// Cycle through featured titles on Home.
     pub rotate_featured: bool,
     /// Feature titles from the whole library on Home, not just the recently added.
@@ -256,6 +332,8 @@ impl Default for Settings {
             audio_language: None,
             subtitle_language: None,
             subtitle_size: SubtitleSize::Medium,
+            subtitle_style: SubtitleStyle::Outline,
+            subtitle_color: SubtitleColor::White,
             rotate_featured: true,
             feature_whole_library: false,
             sidebar_order: NavItem::ALL.to_vec(),
@@ -282,6 +360,8 @@ const AUDIO_OUTPUT: &str = "playback.audio_output";
 const AUDIO_LANG: &str = "playback.audio_language";
 const SUB_LANG: &str = "playback.subtitle_language";
 const SUB_SIZE: &str = "playback.subtitle_size";
+const SUB_STYLE: &str = "playback.subtitle_style";
+const SUB_COLOR: &str = "playback.subtitle_color";
 const ROTATE: &str = "home.rotate_featured";
 const WHOLE_LIBRARY: &str = "home.feature_whole_library";
 const SIDEBAR_ORDER: &str = "ui.sidebar_order";
@@ -328,6 +408,14 @@ impl Db {
             subtitle_size: self
                 .setting(SUB_SIZE)?
                 .and_then(|v| SubtitleSize::parse(&v))
+                .unwrap_or_default(),
+            subtitle_style: self
+                .setting(SUB_STYLE)?
+                .and_then(|v| SubtitleStyle::parse(&v))
+                .unwrap_or_default(),
+            subtitle_color: self
+                .setting(SUB_COLOR)?
+                .and_then(|v| SubtitleColor::parse(&v))
                 .unwrap_or_default(),
             rotate_featured: bool_of(self.setting(ROTATE)?, defaults.rotate_featured),
             feature_whole_library: bool_of(
@@ -386,6 +474,8 @@ impl Db {
             (AUDIO_LANG, s.audio_language.clone().unwrap_or_default()),
             (SUB_LANG, s.subtitle_language.clone().unwrap_or_default()),
             (SUB_SIZE, s.subtitle_size.as_str().to_string()),
+            (SUB_STYLE, s.subtitle_style.as_str().to_string()),
+            (SUB_COLOR, s.subtitle_color.as_str().to_string()),
             (ROTATE, s.rotate_featured.to_string()),
             (WHOLE_LIBRARY, s.feature_whole_library.to_string()),
             (
@@ -492,6 +582,8 @@ mod tests {
             audio_language: Some("ja".into()),
             subtitle_language: Some("en".into()),
             subtitle_size: SubtitleSize::ExtraLarge,
+            subtitle_style: SubtitleStyle::Box,
+            subtitle_color: SubtitleColor::Yellow,
             rotate_featured: false,
             feature_whole_library: true,
             sidebar_order: vec![

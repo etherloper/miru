@@ -12,6 +12,7 @@ use super::*;
 pub(super) enum MenuSection {
     Audio,
     Subtitles,
+    Speed,
     Chapters,
 }
 
@@ -20,6 +21,7 @@ impl MenuSection {
         match self {
             Self::Audio => "Audio",
             Self::Subtitles => "Subtitles",
+            Self::Speed => "Speed",
             Self::Chapters => "Chapters",
         }
     }
@@ -28,6 +30,7 @@ impl MenuSection {
         match self {
             Self::Audio => "icons/waveform.svg",
             Self::Subtitles => "icons/captions.svg",
+            Self::Speed => "icons/speed.svg",
             Self::Chapters => "icons/chapters.svg",
         }
     }
@@ -70,6 +73,7 @@ impl PlayerView {
         let mut rows = vec![
             MainRow::Section(MenuSection::Audio),
             MainRow::Section(MenuSection::Subtitles),
+            MainRow::Section(MenuSection::Speed),
         ];
         if !self.chapters.is_empty() {
             rows.push(MainRow::Section(MenuSection::Chapters));
@@ -120,6 +124,8 @@ impl PlayerView {
                     pick: Pick::Chapter(ix),
                 })
                 .collect(),
+            // A slider and presets of its own (see `render_speed_page`), not a list.
+            MenuSection::Speed => Vec::new(),
         }
     }
 
@@ -139,6 +145,7 @@ impl PlayerView {
             MenuSection::Chapters => self.current_chapter.map_or_else(String::new, |ix| {
                 format!("{} of {}", ix + 1, self.chapters.len())
             }),
+            MenuSection::Speed => speed_label(self.speed),
         }
     }
 
@@ -223,6 +230,15 @@ impl PlayerView {
                 self.poke(cx);
             }
             "left" | "backspace" if page != MenuPage::Main => self.menu_back(cx),
+            // On the speed page Up/Right and Down nudge the slider.
+            "up" | "right" | "down" if page == MenuPage::Section(MenuSection::Speed) => {
+                let step = if key == "down" {
+                    -SPEED_STEP
+                } else {
+                    SPEED_STEP
+                };
+                self.set_speed(self.speed + step, cx);
+            }
             "down" | "up" if count > 0 => {
                 self.menu_cursor = if key == "down" {
                     (self.menu_cursor + 1).min(count - 1)
@@ -264,6 +280,7 @@ impl PlayerView {
         let max_list = (f32::from(window.viewport_size().height) - 320.).clamp(160., 360.);
         let body: AnyElement = match page {
             MenuPage::Main => self.render_main_page(cx),
+            MenuPage::Section(MenuSection::Speed) => self.render_speed_page(cx),
             MenuPage::Section(section) => self.render_section_page(section, max_list, cx),
             MenuPage::Info => self.render_info_page(cx),
         };
@@ -480,6 +497,154 @@ impl PlayerView {
             .into_any_element()
     }
 
+    /// The speed page, like a web player's: the speed in large type, a slider between − and +
+    /// buttons, and presets underneath.
+    fn render_speed_page(&self, cx: &mut Context<Self>) -> AnyElement {
+        let at = ((self.speed - SPEED_MIN) / (SPEED_MAX - SPEED_MIN)).clamp(0., 1.) as f32;
+        let bounds_slot = self.speed_bounds.clone();
+        let header = Self::page_header("Speed", cx).into_any_element();
+        let step_button = |id: &'static str, path: &'static str, delta: f64| {
+            div()
+                .id(id)
+                .size(px(30.))
+                .flex_shrink_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded_full()
+                .cursor_pointer()
+                .hover(|s| s.bg(theme::menu_hover()))
+                .child(icon(path, 14., theme::text()))
+                .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                    this.set_speed(this.speed + delta, cx);
+                }))
+        };
+        let slider = div()
+            .id("speed-slider")
+            .relative()
+            .flex_1()
+            .h(px(24.))
+            .flex()
+            .items_center()
+            .cursor_pointer()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, event: &MouseDownEvent, _, cx| {
+                    if let Some(speed) = this.speed_at(event.position.x) {
+                        this.set_speed(speed, cx);
+                    }
+                    cx.stop_propagation();
+                }),
+            )
+            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
+                if event.pressed_button == Some(MouseButton::Left)
+                    && let Some(speed) = this.speed_at(event.position.x)
+                    && (speed - this.speed).abs() > 0.001
+                {
+                    this.set_speed(speed, cx);
+                }
+            }))
+            .child(
+                canvas(
+                    move |bounds, _, _| bounds_slot.set(Some(bounds)),
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .size_full(),
+            )
+            .child(
+                div()
+                    .w_full()
+                    .h(px(4.))
+                    .rounded_full()
+                    .bg(rgba(0xffffff2e))
+                    .child(
+                        div()
+                            .h_full()
+                            .w(relative(at))
+                            .rounded_full()
+                            .bg(theme::text()),
+                    ),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .top(px(5.))
+                    .left(relative(at))
+                    .ml(px(-7.))
+                    .size(px(14.))
+                    .rounded_full()
+                    .bg(theme::text())
+                    .shadow(theme::card_shadow(0.4)),
+            );
+        let presets = SPEED_PRESETS.iter().enumerate().map(|(ix, &speed)| {
+            let selected = (self.speed - speed).abs() < 0.001;
+            div()
+                .id(("speed-preset", ix))
+                .flex_1()
+                .h(px(28.))
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded_full()
+                .cursor_pointer()
+                .text_xs()
+                .font_weight(FontWeight::SEMIBOLD)
+                .when(selected, |d| d.bg(theme::text()).text_color(theme::bg()))
+                .when(!selected, |d| {
+                    d.bg(rgba(0xffffff14))
+                        .text_color(theme::text_secondary())
+                        .hover(|s| s.bg(rgba(0xffffff26)).text_color(theme::text()))
+                })
+                .child(format!("{}×", trim_float(speed, 2)))
+                .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                    this.set_speed(speed, cx);
+                }))
+        });
+        div()
+            .flex()
+            .flex_col()
+            .child(header)
+            .child(
+                div()
+                    .px_2()
+                    .pt_1()
+                    .pb_2()
+                    .flex()
+                    .flex_col()
+                    .gap_3()
+                    .child(
+                        div()
+                            .flex()
+                            .justify_center()
+                            .text_size(px(22.))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(format!("{:.2}×", self.speed)),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(step_button("speed-down", "icons/minus.svg", -SPEED_STEP))
+                            .child(slider)
+                            .child(step_button("speed-up", "icons/plus.svg", SPEED_STEP)),
+                    )
+                    .child(div().flex().gap_1p5().children(presets)),
+            )
+            .into_any_element()
+    }
+
+    /// The speed under the pointer on the speed slider, to the nearest step.
+    fn speed_at(&self, x: gpui::Pixels) -> Option<f64> {
+        let bounds = self.speed_bounds.get()?;
+        if bounds.size.width <= px(0.) {
+            return None;
+        }
+        let at = f64::from(((x - bounds.origin.x) / bounds.size.width).clamp(0., 1.));
+        Some(SPEED_MIN + at * (SPEED_MAX - SPEED_MIN))
+    }
+
     fn render_info_page(&self, cx: &mut Context<Self>) -> AnyElement {
         let info = self.media_info.clone().unwrap_or_default();
         let rows = info_rows(&info).into_iter().map(|(label, value)| {
@@ -604,6 +769,22 @@ fn info_rows(info: &MediaInfo) -> Vec<(&'static str, String)> {
         rows.push(("File", name.to_string_lossy().into_owned()));
     }
     rows
+}
+
+/// The speed slider's range and step.
+pub(super) const SPEED_MIN: f64 = 0.25;
+pub(super) const SPEED_MAX: f64 = 2.0;
+pub(super) const SPEED_STEP: f64 = 0.05;
+/// One-click speeds under the slider.
+const SPEED_PRESETS: [f64; 5] = [0.5, 1.0, 1.25, 1.5, 2.0];
+
+/// "Normal" for 1×, otherwise e.g. "1.25×".
+pub(super) fn speed_label(speed: f64) -> String {
+    if (speed - 1.0).abs() < 0.01 {
+        "Normal".into()
+    } else {
+        format!("{}×", trim_float(speed, 2))
+    }
 }
 
 fn codec_name(codec: &str) -> String {

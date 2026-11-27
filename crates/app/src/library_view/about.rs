@@ -572,7 +572,12 @@ impl LibraryView {
             .children(control)
             .children(self.update_icon_button(cx))
             .into_any_element();
-        compact_row(&title, &detail, Some(controls)).into_any_element()
+        // A new version reads as good news: its title is green.
+        let label_color = match self.update {
+            UpdateState::Available(_) => theme::success(),
+            _ => theme::text(),
+        };
+        compact_row_colored(&title, &detail, Some(controls), label_color).into_any_element()
     }
 
     /// Links to the project, the data folder, and the small print.
@@ -672,12 +677,20 @@ impl LibraryView {
             }
         };
         let download = icon_path == "icons/download.svg";
+        // Green when there is something to download, so it reads as good news.
+        let (rest, hover) = if download {
+            (theme::success(), theme::success_hover())
+        } else {
+            (theme::text_secondary(), theme::text())
+        };
         Some(
-            theme::icon_button(
+            theme::colored_icon_button(
                 "update-icon",
                 icon_path,
                 34.,
                 true,
+                rest,
+                hover,
                 cx.listener(move |this, _, _, cx| {
                     if download {
                         this.download_update(cx);
@@ -717,6 +730,16 @@ fn plural(n: i64, unit: &str) -> String {
 
 /// A tighter settings row: label and one line of detail, with an optional control.
 fn compact_row(label: &str, detail: &str, control: Option<AnyElement>) -> impl IntoElement {
+    compact_row_colored(label, detail, control, theme::text())
+}
+
+/// [`compact_row`] with the label in `label_color`.
+fn compact_row_colored(
+    label: &str,
+    detail: &str,
+    control: Option<AnyElement>,
+    label_color: gpui::Rgba,
+) -> impl IntoElement {
     div()
         .flex()
         .items_center()
@@ -735,6 +758,7 @@ fn compact_row(label: &str, detail: &str, control: Option<AnyElement>) -> impl I
                     div()
                         .text_sm()
                         .font_weight(FontWeight::MEDIUM)
+                        .text_color(label_color)
                         .child(label.to_string()),
                 )
                 .child(
@@ -853,45 +877,37 @@ impl LibraryView {
     }
 }
 
-/// The round part of the update control: a download arrow with a violet dot; while
-/// downloading, a ring filling around it; when ready, a white disc with a restart arrow.
+/// The round part of the update control: a download (or, when ready, restart) arrow with a
+/// violet dot; while downloading, a ring filling around it instead.
 const UPDATE_GROUP: &str = "update-control";
 
 fn update_badge(size: f32, progress: Option<f32>, ready: bool, failed: bool) -> impl IntoElement {
     let icon_size = size * 0.5;
-    // Ready: a white disc with a dark restart arrow, the one thing left to press.
-    if ready {
-        return div()
-            .size(px(size))
-            .flex_shrink_0()
-            .rounded_full()
-            .flex()
-            .items_center()
-            .justify_center()
-            .bg(theme::text())
-            .group_hover(UPDATE_GROUP, |s| s.bg(rgba(0xffffffff)))
-            .child(icon("icons/restart.svg", size * 0.45, theme::bg()))
-            .into_any_element();
-    }
-    // Otherwise just the icon, no background: it brightens on hover, and a dot sits on its
-    // corner until the download starts.
-    let path = if failed {
+    // Just the icon, no background: it brightens on hover. A waiting download is green; a
+    // restart once it is ready gets a violet dot on its corner, and a retry a red one.
+    let path = if ready {
+        "icons/restart.svg"
+    } else if failed {
         "icons/refresh.svg"
     } else {
         "icons/download.svg"
     };
+    // A download waiting is good news, in the same green as in Settings.
+    let download = progress.is_none() && !ready && !failed;
+    let (rest, hover) = if progress.is_some() {
+        (theme::text_secondary(), theme::text_secondary())
+    } else if download {
+        (theme::success(), theme::success_hover())
+    } else {
+        (rgba(0xd8d8deff), theme::text())
+    };
     let glyph = svg()
         .path(path)
         .size(px(icon_size))
-        .text_color(if progress.is_some() {
-            theme::text_secondary()
-        } else {
-            rgba(0xd8d8deff)
-        })
-        .when(progress.is_none(), |s| {
-            s.group_hover(UPDATE_GROUP, |s| s.text_color(theme::text()))
-        });
-    let dot = progress.is_none().then(|| {
+        .text_color(rest)
+        .group_hover(UPDATE_GROUP, move |s| s.text_color(hover));
+    // The green download needs no dot; restart and retry keep theirs.
+    let dot = (progress.is_none() && !download).then(|| {
         div()
             .absolute()
             .top(px(-3.))

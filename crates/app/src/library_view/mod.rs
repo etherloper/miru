@@ -19,7 +19,8 @@ use miru_core::library::{ItemKind, LibraryItem, Metadata, TitleKey};
 use miru_core::parse::ParsedMedia;
 use miru_core::playback::{ContinueReason, Progress};
 use miru_core::settings::{
-    AudioOutput, LibrarySort, RootStats, SEEK_STEPS, Settings, SubtitleSize, title_sort_key,
+    AudioOutput, LibrarySort, RootStats, SEEK_STEPS, Settings, SubtitleColor, SubtitleSize,
+    SubtitleStyle, title_sort_key,
 };
 use miru_metadata::Tmdb;
 use miru_player::format_time;

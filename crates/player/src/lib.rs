@@ -104,6 +104,15 @@ impl AudioChannels {
     }
 }
 
+/// How text subtitles are drawn against the picture.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SubtitleLook {
+    #[default]
+    Outline,
+    Shadow,
+    Box,
+}
+
 /// Per-session preferences applied when mpv starts.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlaybackOptions {
@@ -116,6 +125,9 @@ pub struct PlaybackOptions {
     pub volume: u32,
     /// Text subtitle size, as mpv's `sub-scale` in hundredths (100 = default).
     pub subtitle_scale_pct: u32,
+    pub subtitle_look: SubtitleLook,
+    /// Text subtitle colour, 0xRRGGBB.
+    pub subtitle_rgb: u32,
     /// Specific tracks to start with (mpv track ids), for choices whose tracks have no
     /// language tag. Take precedence over the language preferences.
     pub audio_track: Option<i64>,
@@ -135,6 +147,8 @@ impl Default for PlaybackOptions {
             subtitle_language: None,
             volume: 100,
             subtitle_scale_pct: 100,
+            subtitle_look: SubtitleLook::Outline,
+            subtitle_rgb: 0xffffff,
             audio_track: None,
             subtitle_track: None,
             audio_title: None,
@@ -212,6 +226,7 @@ impl Player {
             init.set_property("osd-level", 0i64)?;
             Ok(())
         })?;
+        apply_subtitle_look(&mpv, options.subtitle_look, options.subtitle_rgb);
         let mut preferred = Vec::new();
         if options.audio_track.is_none()
             && let Some(title) = &options.audio_title
@@ -413,6 +428,22 @@ impl Player {
     pub fn set_volume(&self, volume: f64) -> Result<()> {
         self.mpv.set_property("volume", volume.clamp(0.0, 100.0))?;
         Ok(self.mpv.set_property("mute", false)?)
+    }
+
+    /// Playback speed (1.0 = normal); pitch is kept.
+    pub fn set_speed(&self, speed: f64) -> Result<()> {
+        Ok(self.mpv.set_property("speed", speed.clamp(0.25, 4.0))?)
+    }
+
+    pub fn set_paused(&self, paused: bool) -> Result<()> {
+        Ok(self.mpv.set_property("pause", paused)?)
+    }
+
+    /// A precise relative seek (to the frame, not the nearest keyframe), for scrubbing.
+    pub fn seek_relative_exact(&self, seconds: f64) -> Result<()> {
+        Ok(self
+            .mpv
+            .command("seek", &[&seconds.to_string(), "relative+exact"])?)
     }
 
     pub fn toggle_mute(&self) -> Result<()> {
@@ -635,6 +666,51 @@ fn language_name(code: &str) -> String {
 }
 
 /// Formats seconds as `h:mm:ss` or `m:ss`.
+/// Styles text subtitles (styled ASS subtitles keep their own look). Set after mpv starts and
+/// only logged on failure, so an option an older libmpv lacks can't stop playback.
+fn apply_subtitle_look(mpv: &Mpv, look: SubtitleLook, rgb: u32) {
+    let set = |names: &[&str], value: &str| {
+        // mpv renamed some options (sub-border-size → sub-outline-size); try the new name first.
+        let mut last = None;
+        for name in names {
+            match mpv.set_property(name, value) {
+                Ok(()) => return,
+                Err(e) => last = Some(e),
+            }
+        }
+        if let Some(e) = last {
+            tracing::warn!("cannot set subtitle option {}: {e}", names[0]);
+        }
+    };
+    let outline_size = ["sub-outline-size", "sub-border-size"];
+    let outline_color = ["sub-outline-color", "sub-border-color"];
+    set(&["sub-color"], &format!("#FF{:06X}", rgb & 0xff_ffff));
+    match look {
+        SubtitleLook::Outline => {
+            set(&["sub-border-style"], "outline-and-shadow");
+            set(&outline_size, "3.2");
+            set(&outline_color, "#FF000000");
+            set(&["sub-shadow-offset"], "0");
+        }
+        SubtitleLook::Shadow => {
+            set(&["sub-border-style"], "outline-and-shadow");
+            set(&outline_size, "1.2");
+            set(&outline_color, "#E6000000");
+            set(&["sub-shadow-offset"], "2.5");
+            set(&["sub-shadow-color"], "#B4000000");
+        }
+        SubtitleLook::Box => {
+            // Depending on the mpv version the box takes the outline or the back colour (with
+            // the outline size as padding), so both are set to the box colour.
+            set(&["sub-border-style"], "background-box");
+            set(&outline_size, "4");
+            set(&outline_color, "#B3000000");
+            set(&["sub-back-color"], "#B3000000");
+            set(&["sub-shadow-offset"], "0");
+        }
+    }
+}
+
 pub fn format_time(seconds: f64) -> String {
     let total = if seconds.is_finite() && seconds > 0.0 {
         seconds as u64

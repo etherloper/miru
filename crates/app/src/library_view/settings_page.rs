@@ -224,6 +224,28 @@ impl LibraryView {
                 this.update_settings(|s| s.subtitle_size = size, cx);
             }),
         );
+        let subtitle_style = segmented(
+            "subtitle-style",
+            SubtitleStyle::ALL
+                .iter()
+                .map(|v| (v.label().to_string(), *v == s.subtitle_style))
+                .collect(),
+            cx.listener(|this, ix: &usize, _, cx| {
+                let style = SubtitleStyle::ALL[*ix];
+                this.update_settings(|s| s.subtitle_style = style, cx);
+            }),
+        );
+        let subtitle_color = segmented(
+            "subtitle-color",
+            SubtitleColor::ALL
+                .iter()
+                .map(|v| (v.label().to_string(), *v == s.subtitle_color))
+                .collect(),
+            cx.listener(|this, ix: &usize, _, cx| {
+                let color = SubtitleColor::ALL[*ix];
+                this.update_settings(|s| s.subtitle_color = color, cx);
+            }),
+        );
         let subtitles = toggle(
             "subtitles-default",
             s.subtitles_by_default,
@@ -283,18 +305,6 @@ impl LibraryView {
             )
             .into_any_element(),
             setting_row(
-                "Subtitles",
-                Some("Turn subtitles on automatically when a file has them."),
-                Some(subtitles.into_any_element()),
-            )
-            .into_any_element(),
-            setting_row(
-                "Subtitle size",
-                Some("Size of text subtitles. Takes effect the next time a video starts."),
-                Some(subtitle_size.into_any_element()),
-            )
-            .into_any_element(),
-            setting_row(
                 "Autoplay next episode",
                 Some("Start the next episode after a short countdown when one finishes."),
                 Some(autoplay.into_any_element()),
@@ -312,11 +322,31 @@ impl LibraryView {
                 "Picked automatically when a file has several audio tracks.",
                 audio_lang.into_any_element(),
             ),
+        ];
+        let subtitle_rows = vec![
+            setting_row(
+                "Subtitles",
+                Some("Turn subtitles on automatically when a file has them."),
+                Some(subtitles.into_any_element()),
+            )
+            .into_any_element(),
             stacked_row(
-                "Preferred subtitle language",
+                "Preferred language",
                 "Picked automatically when subtitles are on.",
                 subtitle_lang.into_any_element(),
             ),
+            stacked_row(
+                "Size",
+                "How large subtitles are drawn.",
+                div().flex().child(subtitle_size).into_any_element(),
+            ),
+            stacked_row(
+                "Style",
+                "How subtitles stand out from the picture.",
+                div().flex().child(subtitle_style).into_any_element(),
+            ),
+            setting_row("Colour", None, Some(subtitle_color.into_any_element())).into_any_element(),
+            subtitle_preview(s.subtitle_size, s.subtitle_style, s.subtitle_color),
         ];
         let home_rows = vec![
             setting_row(
@@ -376,6 +406,13 @@ impl LibraryView {
                                 "Playback",
                                 "Applies the next time you start playing something.",
                                 playback_rows,
+                            ))
+                            .child(section(
+                                "Subtitles",
+                                "Size, style and colour apply to plain text subtitles; styled \
+                                 subtitles (common in anime) keep their own look. Takes effect \
+                                 the next time a video starts.",
+                                subtitle_rows,
                             ))
                             .child(section("Home", "", home_rows))
                             .child(section(
@@ -824,6 +861,71 @@ pub(super) fn section(
                 .flex_col()
                 .children(rows),
         )
+}
+
+/// A sample line drawn the way the player will draw subtitles, over a stand-in picture. GPUI
+/// has no text outline, so outlines are stacked offset copies of the text in black.
+fn subtitle_preview(size: SubtitleSize, style: SubtitleStyle, color: SubtitleColor) -> AnyElement {
+    const SAMPLE: &str = "Subtitles will look like this.";
+    let font = px((19. * size.scale()) as f32);
+    let line = |color: gpui::Rgba| {
+        div()
+            .whitespace_nowrap()
+            .text_size(font)
+            .font_weight(FontWeight::SEMIBOLD)
+            .text_color(color)
+            .child(SAMPLE)
+    };
+    let ring = |radius: f32, color: u32| {
+        (0..12).map(move |i| {
+            let angle = i as f32 * std::f32::consts::TAU / 12.;
+            line(rgba(color))
+                .absolute()
+                .left(px(radius * angle.cos()))
+                .top(px(radius * angle.sin()))
+        })
+    };
+    let text = (color.rgb() << 8) | 0xff;
+    let caption = div().relative();
+    let caption = match style {
+        SubtitleStyle::Outline => caption.children(ring(1.6, 0x000000ff)),
+        SubtitleStyle::Shadow => caption
+            .child(line(rgba(0x000000b4)).absolute().left(px(2.)).top(px(2.)))
+            .children(ring(0.7, 0x000000e6)),
+        SubtitleStyle::Box => caption,
+    }
+    .child(line(rgba(text)));
+    let caption = match style {
+        SubtitleStyle::Box => div()
+            .px_2()
+            .py_0p5()
+            .rounded(px(3.))
+            .bg(rgba(0x000000b3))
+            .child(caption),
+        _ => div().child(caption),
+    };
+    div()
+        .px_5()
+        .py_4()
+        .child(
+            div()
+                .h(px(150.))
+                .rounded(px(10.))
+                .overflow_hidden()
+                // A bright, busy-ish backdrop, where the style makes the most difference.
+                .bg(linear_gradient(
+                    120.,
+                    linear_color_stop(rgba(0x8fb3c9ff), 0.),
+                    linear_color_stop(rgba(0xd9c08aff), 1.),
+                ))
+                .flex()
+                .flex_col()
+                .justify_end()
+                .items_center()
+                .pb_4()
+                .child(caption),
+        )
+        .into_any_element()
 }
 
 /// Label and description on the left, control on the right.

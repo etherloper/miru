@@ -3,6 +3,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod assets;
+mod clock;
 mod config;
 mod folder_watch;
 mod genres;
@@ -29,8 +30,8 @@ use crate::library_sync::AppPaths;
 use crate::library_view::{LibraryEvent, LibraryView};
 use crate::player_view::{PlaybackRequest, PlayerEvent, PlayerView, Session};
 use miru_core::db::Db;
-use miru_core::settings::AudioOutput;
-use miru_player::{AudioChannels, PlaybackOptions};
+use miru_core::settings::{AudioOutput, SubtitleStyle};
+use miru_player::{AudioChannels, PlaybackOptions, SubtitleLook};
 
 /// Top-level shell: the library is always alive; a player is created per playback session
 /// and dropped on close, which shuts down mpv and its video window.
@@ -120,6 +121,12 @@ impl Root {
             subtitle_title: prefs.subtitle_title.clone(),
             volume: settings.volume,
             subtitle_scale_pct: (settings.subtitle_size.scale() * 100.).round() as u32,
+            subtitle_look: match settings.subtitle_style {
+                SubtitleStyle::Outline => SubtitleLook::Outline,
+                SubtitleStyle::Shadow => SubtitleLook::Shadow,
+                SubtitleStyle::Box => SubtitleLook::Box,
+            },
+            subtitle_rgb: settings.subtitle_color.rgb(),
         };
         let session = match Session::start(&request, &options, window) {
             Ok(session) => session,
