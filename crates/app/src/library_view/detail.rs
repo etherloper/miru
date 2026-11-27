@@ -142,12 +142,14 @@ impl LibraryView {
     ) -> impl IntoElement {
         let meta = item.metadata.clone().unwrap_or_default();
         let show_title = item.display_title().to_string();
-        let seasons: Vec<u16> = episodes
+        let mut seasons: Vec<u16> = episodes
             .iter()
             .filter_map(|e| season_of(&e.media))
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect();
+        // Specials (season 0) go after the numbered seasons.
+        seasons.sort_by_key(|&s| (s == 0, s));
         let season = season
             .filter(|s| seasons.contains(s))
             .or_else(|| seasons.first().copied());
@@ -216,9 +218,9 @@ impl LibraryView {
                 .all(|id| progress.get(id).is_some_and(|p| p.watched));
             entries.push(MenuEntry::new(
                 if season_watched {
-                    format!("Mark Season {s} as unwatched")
+                    format!("Mark {} as unwatched", grid::season_name(s))
                 } else {
-                    format!("Mark Season {s} as watched")
+                    format!("Mark {} as watched", grid::season_name(s))
                 },
                 if season_watched {
                     "icons/circle.svg"
@@ -235,35 +237,20 @@ impl LibraryView {
         ));
         actions.push(self.more_menu(entries, Some(&item.key), cx));
 
-        let season_tabs = (seasons.len() > 1).then(|| {
-            div().flex().gap_2().children(seasons.iter().map(|&s| {
-                let selected = Some(s) == season;
-                div()
-                    .id(("season", s as usize))
-                    .tab_index(0)
-                    .focus_visible(theme::focus_ring)
-                    .h(px(34.))
-                    .px_4()
-                    .flex()
-                    .items_center()
-                    .rounded_full()
-                    .text_sm()
-                    .font_weight(FontWeight::MEDIUM)
-                    .cursor_pointer()
-                    .when(selected, |d| d.bg(theme::text()).text_color(theme::bg()))
-                    .when(!selected, |d| {
-                        d.bg(theme::glass())
-                            .text_color(theme::text_secondary())
-                            .hover(|h| h.bg(theme::glass_hover()))
-                    })
-                    .child(format!("Season {s}"))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        if let Page::Show { season, .. } = &mut this.page {
-                            *season = Some(s);
-                            cx.notify();
-                        }
-                    }))
-            }))
+        // One dropdown however many seasons there are, each listed with its progress.
+        let season_tabs = season.filter(|_| seasons.len() > 1).map(|current| {
+            let summary: Vec<(u16, usize, usize)> = seasons
+                .iter()
+                .map(|&s| {
+                    let in_season = episodes.iter().filter(|e| season_of(&e.media) == Some(s));
+                    let total = in_season.clone().count();
+                    let left = in_season
+                        .filter(|e| !progress.get(&e.id).is_some_and(|p| p.watched))
+                        .count();
+                    (s, total, left)
+                })
+                .collect();
+            self.season_dropdown(&summary, current, cx)
         });
 
         let rows = episodes
@@ -311,6 +298,8 @@ impl LibraryView {
                     .child(
                         div()
                             .px(px(PAGE_PADDING))
+                            // Fixed, with or without the season dropdown (see `EPISODES_ROW_H`).
+                            .h(px(40.))
                             .flex()
                             .items_center()
                             .gap_6()

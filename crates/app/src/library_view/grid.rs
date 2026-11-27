@@ -225,7 +225,7 @@ impl LibraryView {
             let genre = name.clone();
             GridOption {
                 label: name.clone().into(),
-                count: Some(*n),
+                count: Some(n.to_string().into()),
                 heading: None,
                 selected: filter.selected.as_deref() == Some(name.as_str()),
                 action: Rc::new(move |this: &mut Self, cx: &mut Context<Self>| {
@@ -360,6 +360,49 @@ impl LibraryView {
         )
     }
 
+    /// The season picker on a show page: "Season 3 ▾", listing each season with its episode
+    /// count and how many are left to watch. `seasons` is (season, episodes, unwatched).
+    pub(super) fn season_dropdown(
+        &self,
+        seasons: &[(u16, usize, usize)],
+        current: u16,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let rows = seasons
+            .iter()
+            .map(|&(season, episodes, left)| {
+                let count = format!("{episodes} episode{}", if episodes == 1 { "" } else { "s" });
+                let detail = match left {
+                    0 => format!("{count} · Watched"),
+                    left if left == episodes => count,
+                    left => format!("{count} · {left} left"),
+                };
+                GridOption {
+                    label: season_name(season).into(),
+                    count: Some(detail.into()),
+                    heading: None,
+                    selected: season == current,
+                    action: Rc::new(move |this: &mut Self, cx: &mut Context<Self>| {
+                        if let Page::Show { season: shown, .. } = &mut this.page {
+                            *shown = Some(season);
+                        }
+                        this.close_genre_menu();
+                        cx.notify();
+                    }),
+                }
+            })
+            .collect();
+        self.grid_dropdown(
+            Tab::Shows,
+            GridMenu::Season,
+            season_name(current).into(),
+            false,
+            rows,
+            280.,
+            cx,
+        )
+    }
+
     /// Sort order: a dropdown reading "Sort: Title".
     pub(super) fn sort_control(&self, tab: Tab, cx: &mut Context<Self>) -> AnyElement {
         let (current, options): (LibrarySort, Vec<LibrarySort>) = match tab {
@@ -398,6 +441,13 @@ impl LibraryView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let open = self.genre_menu == Some((tab, kind));
+        // The chosen option's position among the list's children (headings are children too).
+        let selected_child = options.iter().position(|o| o.selected).map(|ix| {
+            ix + options[..ix].iter().filter(|o| o.heading.is_some()).count()
+                + usize::from(options[ix].heading.is_some())
+        });
+        // The season picker sits at the left of the page, so its menu opens rightwards.
+        let open_right = kind == GridMenu::Season;
         let trigger = div()
             .id(("grid-dropdown", kind as usize))
             .tab_index(0)
@@ -444,6 +494,11 @@ impl LibraryView {
                     this.close_genre_menu();
                 } else if this.genre_menu_closed.elapsed() > Duration::from_millis(200) {
                     this.genre_menu = Some((tab, kind));
+                    // Open at the top, or on the chosen option in a long list.
+                    this.grid_menu_scroll.reset();
+                    if let Some(ix) = selected_child {
+                        this.grid_menu_scroll.handle.scroll_to_item(ix);
+                    }
                 }
                 cx.notify();
             }));
@@ -476,11 +531,12 @@ impl LibraryView {
                         ),
                     )
                     .child(div().flex_1().child(option.label))
-                    .children(option.count.map(|n| {
+                    .children(option.count.map(|text| {
                         div()
+                            .flex_shrink_0()
                             .text_xs()
                             .text_color(theme::text_tertiary())
-                            .child(n.to_string())
+                            .child(text)
                     }))
                     .on_click(cx.listener(move |this, _, _, cx| action(this, cx)));
                 let heading = option.heading.map(|heading| {
@@ -517,10 +573,18 @@ impl LibraryView {
                 .with_animation("grid-menu-open", theme::menu_open_animation(), |el, t| {
                     el.opacity(t).mt(px(8. - 6. * (1. - t)))
                 });
-            div().absolute().top_full().right_0().child(
+            let (side, anchor) = if open_right {
+                (div().absolute().top_full().left_0(), gpui::Anchor::TopLeft)
+            } else {
+                (
+                    div().absolute().top_full().right_0(),
+                    gpui::Anchor::TopRight,
+                )
+            };
+            side.child(
                 gpui::deferred(
                     gpui::anchored()
-                        .anchor(gpui::Anchor::TopRight)
+                        .anchor(anchor)
                         .snap_to_window_with_margin(px(12.))
                         .child(list),
                 )
@@ -537,6 +601,15 @@ impl LibraryView {
     }
 }
 
+/// "Season 3", or "Specials" for season 0.
+pub(super) fn season_name(season: u16) -> String {
+    if season == 0 {
+        "Specials".into()
+    } else {
+        format!("Season {season}")
+    }
+}
+
 /// Which grid dropdown is open.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum GridMenu {
@@ -545,13 +618,16 @@ pub(super) enum GridMenu {
     Rating,
     Length,
     Sort,
+    /// The season picker on a show page.
+    Season,
 }
 
 type GridAction = Rc<dyn Fn(&mut LibraryView, &mut Context<LibraryView>)>;
 
 struct GridOption {
     label: SharedString,
-    count: Option<usize>,
+    /// Quiet text at the right: a count, or a short detail.
+    count: Option<SharedString>,
     /// A section title drawn above this option.
     heading: Option<SharedString>,
     selected: bool,

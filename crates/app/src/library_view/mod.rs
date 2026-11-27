@@ -107,10 +107,10 @@ const EPISODE_ART_BATCH: u32 = 4;
 const EPISODE_CARD_W: f32 = 352.;
 const SYNOPSIS_LINE_H: f32 = 20.;
 /// Height of everything under a show's hero, so a page that fits doesn't scroll: heading row
-/// (34) + gap (8) + shelf padding (16 + 24) + episode card (thumbnail and caption, 260; the
-/// synopsis shows over the thumbnail) + bottom padding (32). The band the row overlaps is
-/// added to the hero separately.
-const EPISODES_ROW_H: f32 = 34. + 8. + 16. + 24. + 260. + 32.;
+/// (40, the season dropdown) + gap (8) + shelf padding (16 + 24) + episode card (thumbnail and
+/// caption, 260; the synopsis shows over the thumbnail) + bottom padding (32). The band the
+/// row overlaps is added to the hero separately.
+const EPISODES_ROW_H: f32 = 40. + 8. + 16. + 24. + 260. + 32.;
 /// How far the episode row rises into the bottom of a show's hero.
 const EPISODES_OVERLAP: f32 = 56.;
 /// Widest each kind of artwork is decoded at: about twice its layout width, for high-DPI

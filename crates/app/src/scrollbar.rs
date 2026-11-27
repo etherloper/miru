@@ -7,6 +7,7 @@
 
 use std::cell::Cell;
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 use gpui::{
     App, Bounds, CursorStyle, DispatchPhase, Element, ElementId, EntityId, GlobalElementId, Hitbox,
@@ -63,9 +64,24 @@ impl ScrollbarSize {
 /// Space kept clear at the ends of the track.
 const PAD: f32 = 4.;
 
-/// Drag state kept by the view between frames: while dragging, where in the thumb the
-/// pointer took hold of it.
-pub type ScrollbarDrag = Rc<Cell<Option<f32>>>;
+/// A scrollbar shows while its page moves, is hovered or dragged, and fades out this long after.
+const SHOW_FOR: Duration = Duration::from_millis(1000);
+const FADE: Duration = Duration::from_millis(300);
+
+/// State kept by the view between frames.
+#[derive(Default)]
+pub struct ScrollbarState {
+    /// While dragging, where in the thumb the pointer took hold of it.
+    drag: Cell<Option<f32>>,
+    /// The scroll offset at the last paint, to notice scrolling.
+    last_offset: Cell<Option<f32>>,
+    /// When it was last scrolled, hovered or dragged.
+    active_at: Cell<Option<Instant>>,
+    /// A repaint is already scheduled for when the fade starts.
+    wake_pending: Cell<bool>,
+}
+
+pub type ScrollbarDrag = Rc<ScrollbarState>;
 
 /// A smaller scrolling area (a panel, list or menu) and its scrollbar, kept by the view.
 ///
@@ -101,7 +117,9 @@ impl ScrollArea {
         if self.handle.offset() != Point::default() {
             self.handle.set_offset(Point::default());
         }
-        self.drag.set(None);
+        self.drag.drag.set(None);
+        // Opening afresh isn't scrolling: don't flash the scrollbar for the jump to the top.
+        self.drag.last_offset.set(None);
     }
 }
 
@@ -119,6 +137,47 @@ pub struct Scrollbar {
 }
 
 impl Scrollbar {
+    /// How visible the thumb is (0–1): fully while the page scrolls or the scrollbar is
+    /// hovered or dragged, then for `SHOW_FOR` after, then fading out over `FADE`. Arranges
+    /// the repaints the fade needs.
+    fn visibility(&self, active: bool, window: &mut Window, cx: &mut App) -> f32 {
+        let state = &self.drag;
+        let now = Instant::now();
+        let offset = f32::from(self.handle.offset().y);
+        // The first paint (a page just opened) only records where it starts.
+        let scrolled = state
+            .last_offset
+            .replace(Some(offset))
+            .is_some_and(|last| (last - offset).abs() > 0.5);
+        if active || scrolled {
+            state.active_at.set(Some(now));
+        }
+        let Some(idle) = state.active_at.get().map(|at| now - at) else {
+            return 0.;
+        };
+        if idle < SHOW_FOR {
+            // Nothing else may repaint once scrolling stops, so wake for the fade.
+            // One at a time: when it fires, the repaint schedules the next if still needed.
+            if !active && !state.wake_pending.replace(true) {
+                let wait = SHOW_FOR - idle;
+                let state = state.clone();
+                window
+                    .spawn(cx, async move |cx| {
+                        cx.background_executor().timer(wait).await;
+                        state.wake_pending.set(false);
+                        cx.update(|window, _| window.refresh()).ok();
+                    })
+                    .detach();
+            }
+            1.
+        } else if idle < SHOW_FOR + FADE {
+            window.request_animation_frame();
+            1. - (idle - SHOW_FOR).as_secs_f32() / FADE.as_secs_f32()
+        } else {
+            0.
+        }
+    }
+
     /// An overlay filling its (relatively positioned) parent; place it after the page.
     pub fn new(handle: ScrollHandle, drag: ScrollbarDrag, top_inset: f32, view: EntityId) -> Self {
         Self {
@@ -276,16 +335,17 @@ impl Element for Scrollbar {
         _: &mut (),
         prepaint: &mut ScrollbarPrepaint,
         window: &mut Window,
-        _: &mut App,
+        cx: &mut App,
     ) {
         let (Some(g), Some(hitbox)) = (prepaint.geometry, prepaint.hitbox.clone()) else {
             // Nothing to scroll (or the page went away mid-drag): let go.
-            self.drag.set(None);
+            self.drag.drag.set(None);
             return;
         };
-        let dragging = self.drag.get().is_some();
+        let dragging = self.drag.drag.get().is_some();
         let hovered = hitbox.is_hovered(window);
         let active = dragging || hovered;
+        let opacity = self.visibility(active, window, cx);
         // A fixed width; hovering only brightens it.
         let width = g.metrics.width;
         let thumb = Bounds::new(
@@ -304,19 +364,17 @@ impl Element for Scrollbar {
                 .corner_radii(px(width / 2.)),
             );
         }
-        window.paint_quad(
-            fill(
-                thumb,
-                if dragging {
-                    rgba(0xffffffb3)
-                } else if hovered {
-                    rgba(0xffffff8c)
-                } else {
-                    rgba(0xffffff4d)
-                },
-            )
-            .corner_radii(px(width / 2.)),
-        );
+        if opacity > 0. {
+            let mut color = if dragging {
+                rgba(0xffffffb3)
+            } else if hovered {
+                rgba(0xffffff8c)
+            } else {
+                rgba(0xffffff4d)
+            };
+            color.a *= opacity;
+            window.paint_quad(fill(thumb, color).corner_radii(px(width / 2.)));
+        }
         window.set_cursor_style(CursorStyle::Arrow, &hitbox);
 
         let view = self.view;
@@ -346,7 +404,7 @@ impl Element for Scrollbar {
                     scroll_to(y - grab, window, cx);
                     grab
                 };
-                drag.set(Some(grab));
+                drag.drag.set(Some(grab));
                 window.refresh();
                 cx.stop_propagation();
             });
@@ -358,13 +416,13 @@ impl Element for Scrollbar {
                 if phase != DispatchPhase::Bubble {
                     return;
                 }
-                match drag.get() {
+                match drag.drag.get() {
                     Some(grab) if event.pressed_button == Some(MouseButton::Left) => {
                         scroll_to(f32::from(event.position.y) - grab, window, cx);
                         cx.stop_propagation();
                     }
                     Some(_) => {
-                        drag.set(None);
+                        drag.drag.set(None);
                         window.refresh();
                     }
                     None => {
@@ -379,7 +437,7 @@ impl Element for Scrollbar {
         {
             let drag = self.drag.clone();
             window.on_mouse_event(move |_: &MouseUpEvent, phase, window, _| {
-                if phase == DispatchPhase::Capture && drag.take().is_some() {
+                if phase == DispatchPhase::Capture && drag.drag.take().is_some() {
                     window.refresh();
                 }
             });

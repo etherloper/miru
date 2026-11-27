@@ -102,15 +102,23 @@ impl LibraryView {
                 cx.stop_propagation();
                 return;
             }
-            "down" => {
-                self.search_selected = (self.search_selected + 1).min(hits.len().saturating_sub(1))
+            "down" | "up" => {
+                self.search_selected = if k.key == "down" {
+                    (self.search_selected + 1).min(hits.len().saturating_sub(1))
+                } else {
+                    self.search_selected.saturating_sub(1)
+                };
+                // Keep the highlighted row in view (rows are the list's first children).
+                self.search_hits_scroll
+                    .handle
+                    .scroll_to_item(self.search_selected);
             }
-            "up" => self.search_selected = self.search_selected.saturating_sub(1),
             _ => match self.search_draft.handle_key(k, cx) {
                 KeyOutcome::Changed => {
                     let draft = self.search_draft.text().to_string();
                     self.run_search(&draft);
                     self.search_selected = 0;
+                    self.search_hits_scroll.reset();
                 }
                 KeyOutcome::Moved => {}
                 KeyOutcome::Unhandled => return,
