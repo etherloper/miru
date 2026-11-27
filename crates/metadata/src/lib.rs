@@ -93,6 +93,80 @@ impl From<SearchResult> for TmdbMatch {
     }
 }
 
+/// A film or show someone acted in, from their TMDB credits.
+#[derive(Debug, Clone, PartialEq)]
+pub struct KnownCredit {
+    pub kind: ItemKind,
+    pub tmdb_id: i64,
+    pub title: String,
+    pub year: Option<u16>,
+    pub character: Option<String>,
+    pub poster_path: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct CombinedCredits {
+    #[serde(default)]
+    cast: Vec<CombinedCredit>,
+}
+
+#[derive(Deserialize)]
+struct CombinedCredit {
+    id: i64,
+    media_type: String,
+    title: Option<String>,
+    name: Option<String>,
+    release_date: Option<String>,
+    first_air_date: Option<String>,
+    character: Option<String>,
+    poster_path: Option<String>,
+    #[serde(default)]
+    vote_count: u32,
+    #[serde(default)]
+    genre_ids: Vec<i64>,
+}
+
+/// TMDB TV genres that aren't acting roles: news and talk shows.
+const NON_ACTING_GENRES: [i64; 2] = [10763, 10767];
+
+/// The credits worth showing as "known for": acting roles in films and shows with a poster,
+/// most-voted first, one per title.
+fn pick_known_for(cast: Vec<CombinedCredit>, limit: usize) -> Vec<KnownCredit> {
+    let mut cast: Vec<CombinedCredit> = cast
+        .into_iter()
+        .filter(|c| c.poster_path.is_some())
+        .filter(|c| !c.genre_ids.iter().any(|g| NON_ACTING_GENRES.contains(g)))
+        .filter(|c| {
+            !c.character.as_deref().is_some_and(|ch| {
+                let ch = ch.to_ascii_lowercase();
+                ch == "himself" || ch == "herself" || ch.starts_with("self")
+            })
+        })
+        .collect();
+    cast.sort_by_key(|c| std::cmp::Reverse(c.vote_count));
+    let mut seen = std::collections::HashSet::new();
+    cast.into_iter()
+        .filter_map(|c| {
+            let kind = match c.media_type.as_str() {
+                "movie" => ItemKind::Movie,
+                "tv" => ItemKind::Show,
+                _ => return None,
+            };
+            seen.insert((c.media_type.clone(), c.id))
+                .then(|| KnownCredit {
+                    kind,
+                    tmdb_id: c.id,
+                    title: c.title.or(c.name).unwrap_or_default(),
+                    year: year_of(c.release_date.or(c.first_air_date).as_deref()),
+                    character: c.character.filter(|ch| !ch.trim().is_empty()),
+                    poster_path: c.poster_path,
+                })
+        })
+        .filter(|c| !c.title.is_empty())
+        .take(limit)
+        .collect()
+}
+
 /// Everything shown on a details page, from one `/movie/{id}` or `/tv/{id}` request.
 #[derive(Debug, Default, Deserialize)]
 struct DetailsResponse {
@@ -328,6 +402,16 @@ impl Tmdb {
             .query("append_to_response", format!("images,{credits},{ratings}"))
             .query("include_image_language", "en,null");
         Ok(self.authed(request).call()?.body_mut().read_json()?)
+    }
+
+    /// What a person is best known for as an actor: their most-voted films and shows, at most
+    /// `limit`, leaving out talk shows, news and appearances as themselves.
+    pub fn known_for(&self, person_id: i64, limit: usize) -> Result<Vec<KnownCredit>> {
+        let request = self
+            .agent
+            .get(format!("{API}/person/{person_id}/combined_credits"));
+        let response: CombinedCredits = self.authed(request).call()?.body_mut().read_json()?;
+        Ok(pick_known_for(response.cast, limit))
     }
 
     /// Episodes of one season of a TV show. A season TMDB doesn't know returns an empty list.
@@ -1064,6 +1148,39 @@ fn merge(local: LocalArtwork, online: Option<MetadataResult>) -> Option<Metadata
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn known_for_keeps_acting_roles_by_votes() {
+        let credit = |id, media: &str, title: &str, votes, character: &str, genres: Vec<i64>| {
+            CombinedCredit {
+                id,
+                media_type: media.into(),
+                title: (media == "movie").then(|| title.to_string()),
+                name: (media == "tv").then(|| title.to_string()),
+                release_date: Some("1995-12-15".into()),
+                first_air_date: None,
+                character: Some(character.into()),
+                poster_path: Some("/p.jpg".into()),
+                vote_count: votes,
+                genre_ids: genres,
+            }
+        };
+        let picked = pick_known_for(
+            vec![
+                credit(1, "movie", "Heat", 7000, "Neil McCauley", vec![]),
+                credit(2, "tv", "Late Show", 9000, "Himself", vec![]),
+                credit(3, "tv", "Chat Hour", 8000, "Guest", vec![10767]),
+                credit(4, "movie", "Ronin", 3000, "Sam", vec![]),
+                // The same film credited twice (two roles) is listed once.
+                credit(1, "movie", "Heat", 7000, "Narrator", vec![]),
+            ],
+            10,
+        );
+        let titles: Vec<&str> = picked.iter().map(|c| c.title.as_str()).collect();
+        assert_eq!(titles, ["Heat", "Ronin"]);
+        assert_eq!(picked[0].year, Some(1995));
+        assert_eq!(picked[0].kind, ItemKind::Movie);
+    }
 
     fn candidate(id: i64, title: &str, year: u16, popularity: f32) -> TmdbMatch {
         TmdbMatch {

@@ -243,6 +243,16 @@ const MIGRATIONS: &[&str] = &[
     -- look up again every episode TMDB gave nothing for.
     UPDATE episode_art SET tmdb_checked = 0 WHERE name IS NULL AND overview IS NULL;
 ",
+    r"
+    -- Titles saved to watch later, keyed like collection items.
+    CREATE TABLE watchlist (
+        kind      TEXT NOT NULL,
+        title     TEXT NOT NULL COLLATE NOCASE,
+        year      INTEGER NOT NULL,
+        added_at  INTEGER NOT NULL,
+        PRIMARY KEY (kind, title, year)
+    );
+",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]

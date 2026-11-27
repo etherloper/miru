@@ -176,6 +176,30 @@ pub fn apply_match(
     )?)
 }
 
+/// What a person is known for on TMDB, with poster thumbnails (`None` where the download
+/// failed).
+pub fn known_for(
+    paths: &AppPaths,
+    tmdb: &Tmdb,
+    person_id: i64,
+    limit: usize,
+) -> Result<Vec<(miru_metadata::KnownCredit, Option<PathBuf>)>> {
+    let cache = ArtworkCache::new(&paths.artwork)?;
+    Ok(tmdb
+        .known_for(person_id, limit)?
+        .into_iter()
+        .map(|credit| {
+            let thumb = credit.poster_path.as_deref().and_then(|remote| {
+                cache
+                    .thumbnail(tmdb, remote)
+                    .inspect_err(|e| tracing::warn!("thumbnail download failed: {e}"))
+                    .ok()
+            });
+            (credit, thumb)
+        })
+        .collect())
+}
+
 /// Downloads cast photos that aren't cached yet; returns `(person_id, file)` for every photo
 /// available. Failures are logged and skipped (the pane shows initials instead).
 pub fn cast_photos(

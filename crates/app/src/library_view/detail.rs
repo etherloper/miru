@@ -70,6 +70,7 @@ impl LibraryView {
             ),
         }
 
+        actions.push(self.watchlist_button(&item.key, cx));
         let (fix_item, file_id) = (item.clone(), item.file_id);
         actions.push(self.more_menu(
             vec![
@@ -235,6 +236,7 @@ impl LibraryView {
             "icons/pencil.svg",
             move |this, _, cx| this.open_fix_match(fix_item.clone(), cx),
         ));
+        actions.push(self.watchlist_button(&item.key, cx));
         actions.push(self.more_menu(entries, Some(&item.key), cx));
 
         // One dropdown however many seasons there are, each listed with its progress.

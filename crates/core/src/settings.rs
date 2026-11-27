@@ -235,10 +235,17 @@ pub enum NavItem {
     Home,
     Movies,
     Shows,
+    Watchlist,
 }
 
 impl NavItem {
-    pub const ALL: [Self; 4] = [Self::Search, Self::Home, Self::Movies, Self::Shows];
+    pub const ALL: [Self; 5] = [
+        Self::Search,
+        Self::Home,
+        Self::Movies,
+        Self::Shows,
+        Self::Watchlist,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -246,6 +253,7 @@ impl NavItem {
             Self::Home => "Home",
             Self::Movies => "Movies",
             Self::Shows => "TV Shows",
+            Self::Watchlist => "Watchlist",
         }
     }
 
@@ -255,6 +263,7 @@ impl NavItem {
             Self::Home => "home",
             Self::Movies => "movies",
             Self::Shows => "shows",
+            Self::Watchlist => "watchlist",
         }
     }
 
@@ -591,6 +600,7 @@ mod tests {
                 NavItem::Shows,
                 NavItem::Movies,
                 NavItem::Search,
+                NavItem::Watchlist,
             ],
             autoplay_next: false,
             sidebar_collapsed: true,
@@ -620,11 +630,11 @@ mod tests {
         use NavItem::*;
         assert_eq!(
             NavItem::parse_order("shows,home"),
-            vec![Shows, Home, Search, Movies]
+            vec![Shows, Home, Search, Movies, Watchlist]
         );
         assert_eq!(
             NavItem::parse_order("movies, bogus,movies,search"),
-            vec![Movies, Search, Home, Shows]
+            vec![Movies, Search, Home, Shows, Watchlist]
         );
         assert_eq!(NavItem::parse_order(""), NavItem::ALL.to_vec());
     }

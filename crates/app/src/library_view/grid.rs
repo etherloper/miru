@@ -33,6 +33,7 @@ impl LibraryView {
                     .child(format!("{count} titles")),
             )
             .child(div().flex_1())
+            .child(self.surprise_button(tab, count, cx))
             .child(self.watched_dropdown(tab, cx))
             .child(self.genre_dropdown(tab, cx))
             .child(self.rating_dropdown(tab, cx))
@@ -108,6 +109,72 @@ impl LibraryView {
             .child(header)
             .child(list)
             .into_any_element()
+    }
+
+    /// "Surprise me": opens a random title from the grid as it's filtered, preferring ones not
+    /// yet watched. Hidden while the grid is empty.
+    fn surprise_button(&self, tab: Tab, count: usize, cx: &mut Context<Self>) -> AnyElement {
+        if count == 0 {
+            return theme::nothing();
+        }
+        div()
+            .id("surprise-me")
+            .tab_index(0)
+            .focus_visible(theme::focus_ring)
+            .h(px(40.))
+            .pl_3()
+            .pr_4()
+            .flex()
+            .flex_shrink_0()
+            .items_center()
+            .gap_2()
+            .rounded(px(20.))
+            .border_1()
+            .border_color(theme::glass_border())
+            .bg(theme::glass())
+            .hover(|s| s.bg(theme::glass_hover()))
+            .text_sm()
+            .font_weight(FontWeight::MEDIUM)
+            .whitespace_nowrap()
+            .cursor_pointer()
+            .child(icon("icons/shuffle.svg", 15., theme::text()))
+            .child("Surprise me")
+            .tooltip(theme::text_tooltip("Open a random title from these"))
+            .on_click(cx.listener(move |this, _, _, cx| this.surprise(tab, cx)))
+            .into_any_element()
+    }
+
+    /// Opens a random title from the filtered grid: an unwatched one when there are any (unless
+    /// the grid is showing watched titles), and never the one picked last time if there's a
+    /// choice.
+    fn surprise(&mut self, tab: Tab, cx: &mut Context<Self>) {
+        let Some(filter) = self.genre_filter(tab) else {
+            return;
+        };
+        let items = filter.items.clone();
+        let unwatched: Vec<&LibraryItem> =
+            items.iter().filter(|item| !self.is_watched(item)).collect();
+        let mut pool: Vec<&LibraryItem> = if unwatched.is_empty() {
+            items.iter().collect()
+        } else {
+            unwatched
+        };
+        if pool.len() > 1 {
+            pool.retain(|item| self.last_surprise.as_ref() != Some(&item.key));
+        }
+        if pool.is_empty() {
+            return;
+        }
+        let roll = std::collections::hash_map::RandomState::new().hash_one(Instant::now());
+        let Some(item) = pool
+            .get((roll % pool.len() as u64) as usize)
+            .map(|i| (*i).clone())
+        else {
+            return;
+        };
+        self.last_surprise = Some(item.key.clone());
+        self.close_genre_menu();
+        self.open(&item, cx);
     }
 
     pub(super) fn genre_filter(&self, tab: Tab) -> Option<&GenreFilter> {

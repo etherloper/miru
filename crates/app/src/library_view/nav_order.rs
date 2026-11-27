@@ -154,6 +154,7 @@ impl LibraryView {
                 NavItem::Home => "icons/home.svg",
                 NavItem::Movies => "icons/film.svg",
                 NavItem::Shows => "icons/tv.svg",
+                NavItem::Watchlist => "icons/bookmark.svg",
             };
             div()
                 .id(("nav-order", ix + if lifted { 100 } else { 0 }))

@@ -30,6 +30,9 @@ pub struct Backup {
     pub settings: Vec<(String, String)>,
     pub folders: Vec<String>,
     pub collections: Vec<BackupCollection>,
+    /// Missing from backups made before the watchlist existed.
+    #[serde(default)]
+    pub watchlist: Vec<BackupTitle>,
     pub history: Vec<BackupProgress>,
     pub show_tracks: Vec<BackupShowTracks>,
 }
@@ -118,6 +121,16 @@ impl Db {
             });
         }
 
+        let watchlist = self
+            .watchlist()?
+            .into_iter()
+            .map(|k| BackupTitle {
+                kind: kind_name(k.kind).into(),
+                title: k.title,
+                year: k.year,
+            })
+            .collect();
+
         let mut stmt = self.conn.prepare(
             "SELECT f.kind, f.title, f.year, f.season, f.episode,
                     p.position, p.duration, p.watched, p.updated_at
@@ -167,6 +180,7 @@ impl Db {
             settings,
             folders,
             collections,
+            watchlist,
             history,
             show_tracks,
         })
@@ -218,6 +232,19 @@ impl Db {
                 self.add_to_collection(id, &key)?;
             }
             report.collections += 1;
+        }
+
+        for item in &backup.watchlist {
+            let key = TitleKey {
+                kind: if item.kind == "show" {
+                    ItemKind::Show
+                } else {
+                    ItemKind::Movie
+                },
+                title: item.title.clone(),
+                year: item.year,
+            };
+            self.set_on_watchlist(&key, true)?;
         }
 
         for entry in &backup.history {

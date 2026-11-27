@@ -50,6 +50,7 @@ mod ratings;
 mod search;
 mod settings_page;
 mod sidebar;
+mod watchlist;
 
 use collections::{CardMenu, CollectionEdit, CollectionMenu};
 use detail::*;
@@ -128,8 +129,9 @@ const SLOW_RENDER: Duration = Duration::from_millis(6);
 type ClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut gpui::App)>;
 
 /// Shelves with their own horizontal scroll handle.
-const SHELVES: [&str; 5] = [
+const SHELVES: [&str; 6] = [
     "shelf-continue",
+    "shelf-watchlist",
     "shelf-recent",
     "shelf-movies",
     "shelf-shows",
@@ -202,6 +204,8 @@ enum Page {
         id: i64,
         items: Vec<LibraryItem>,
     },
+    /// Titles saved to watch later.
+    Watchlist,
 }
 
 #[derive(Clone, PartialEq)]
@@ -315,6 +319,8 @@ pub struct LibraryView {
     /// by landing on the trigger doesn't reopen it).
     genre_menu: Option<(Tab, GridMenu)>,
     genre_menu_closed: Instant,
+    /// The title "Surprise me" opened last, so it doesn't pick the same one twice running.
+    last_surprise: Option<TitleKey>,
     /// Detail page "⋯" menu: open, and when it last closed (see `genre_menu_closed`).
     more_menu: bool,
     more_menu_closed: Instant,
@@ -322,6 +328,8 @@ pub struct LibraryView {
     fix_match: Option<fix_match::FixMatch>,
     /// Full cast sheet, and an epoch per opening (for its entrance).
     cast_pane: Option<cast::CastPane>,
+    /// TMDB "known for" titles per person, fetched once a session.
+    known_for: HashMap<i64, Rc<Vec<cast::KnownTitle>>>,
     cast_epoch: usize,
     /// "Read more" on a detail page: the full synopsis and details.
     details_modal: Option<details_modal::DetailsModal>,
@@ -380,6 +388,8 @@ pub struct LibraryView {
     key_focus: FocusHandle,
     key_focus_pending: bool,
     recent: Vec<LibraryItem>,
+    /// Titles saved to watch later that are in the library, most recently saved first.
+    watchlist: Vec<LibraryItem>,
     featured: Vec<LibraryItem>,
     continue_cards: Vec<ContinueCard>,
     hero_index: usize,
@@ -494,10 +504,12 @@ impl LibraryView {
             watched_shows: Default::default(),
             genre_menu: None,
             genre_menu_closed: Instant::now(),
+            last_surprise: None,
             more_menu: false,
             more_menu_closed: Instant::now(),
             fix_match: None,
             cast_pane: None,
+            known_for: HashMap::new(),
             cast_epoch: 0,
             details_modal: None,
             details_scroll: Default::default(),
@@ -541,6 +553,7 @@ impl LibraryView {
             key_focus: cx.focus_handle(),
             key_focus_pending: false,
             recent: Vec::new(),
+            watchlist: Vec::new(),
             featured: Vec::new(),
             continue_cards: Vec::new(),
             hero_index: 0,
@@ -656,7 +669,7 @@ impl LibraryView {
         self.reload();
         self.fill_continue_art(cx);
         let result = match &mut self.page {
-            Page::Browse(_) | Page::Settings | Page::Collection { .. } => Ok(()),
+            Page::Browse(_) | Page::Settings | Page::Collection { .. } | Page::Watchlist => Ok(()),
             Page::Movie { item, progress } => self.db.progress(item.file_id).map(|p| *progress = p),
             Page::Show {
                 item,
@@ -697,6 +710,7 @@ impl LibraryView {
             self.recent = recent;
             self.continue_cards = self.build_continue_cards()?;
             self.reload_collections();
+            self.reload_watchlist();
             self.roots = self.db.root_stats()?;
             self.history = self.db.watch_history(HISTORY_LIMIT)?;
             self.root_count = self.roots.len();
@@ -1609,7 +1623,7 @@ impl LibraryView {
             Page::Browse(Tab::Movies | Tab::Shows) => {
                 self.grid_scroll.0.borrow().base_handle.clone()
             }
-            Page::Collection { .. } => self.collection_scroll.clone(),
+            Page::Collection { .. } | Page::Watchlist => self.collection_scroll.clone(),
             Page::Browse(Tab::Search) | Page::Settings | Page::Movie { .. } | Page::Show { .. } => {
                 self.detail_scroll.clone()
             }
@@ -1655,6 +1669,7 @@ impl Render for LibraryView {
             match &self.page {
                 Page::Browse(Tab::Home) => self.render_home(window, cx).into_any_element(),
                 Page::Settings => self.render_settings(window, cx).into_any_element(),
+                Page::Watchlist => self.render_watchlist(window, cx),
                 Page::Browse(Tab::Search) => self.render_search(cx).into_any_element(),
                 Page::Browse(Tab::Movies) => self.render_grid(
                     Tab::Movies,

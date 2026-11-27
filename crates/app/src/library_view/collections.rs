@@ -460,6 +460,7 @@ impl LibraryView {
                 },
             ));
         }
+        entries.push(self.watchlist_entry(&menu.key).divided());
         if let Some(name) = menu
             .collection
             .and_then(|id| self.collection(id))

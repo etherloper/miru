@@ -26,6 +26,7 @@ impl LibraryView {
                     .gap_8()
                     .pb_16()
                     .child(self.render_continue_shelf(cx))
+                    .child(self.render_watchlist_shelf(cx))
                     .child(self.render_shelf("shelf-recent", "Recently Added", &self.recent, cx))
                     .child(self.render_shelf("shelf-movies", "Movies", &self.movies, cx))
                     .child(self.render_shelf("shelf-shows", "TV Shows", &self.shows, cx)),

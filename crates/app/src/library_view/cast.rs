@@ -31,6 +31,23 @@ struct PersonView {
     member: CastMember,
     /// Library titles they appear in, with the character they play.
     credits: Vec<(LibraryItem, Option<String>)>,
+    known_for: KnownFor,
+}
+
+/// A title someone is known for on TMDB, with its cached poster thumbnail.
+pub(super) struct KnownTitle {
+    credit: miru_metadata::KnownCredit,
+    thumb: Option<String>,
+}
+
+/// How many "known for" titles to fetch; those already in the library are then left out.
+const KNOWN_FOR_LIMIT: usize = 12;
+
+enum KnownFor {
+    Loading,
+    Ready(Rc<Vec<KnownTitle>>),
+    /// No TMDB key, or the request failed: the section is left out.
+    Unavailable,
 }
 
 impl LibraryView {
@@ -157,12 +174,184 @@ impl LibraryView {
         if member.person_id == 0 {
             return;
         }
-        let credits = self.library_credits(member.person_id);
-        if let Some(pane) = &mut self.cast_pane {
-            pane.person = Some(PersonView { member, credits });
-            self.person_scroll.reset();
-            cx.notify();
-        }
+        let person_id = member.person_id;
+        let credits = self.library_credits(person_id);
+        let cached = self.known_for.get(&person_id).cloned();
+        let known_for = match (&cached, &self.tmdb) {
+            (Some(titles), _) => KnownFor::Ready(titles.clone()),
+            (None, Some(_)) => KnownFor::Loading,
+            (None, None) => KnownFor::Unavailable,
+        };
+        let Some(pane) = &mut self.cast_pane else {
+            return;
+        };
+        pane.person = Some(PersonView {
+            member,
+            credits,
+            known_for,
+        });
+        self.person_scroll.reset();
+        cx.notify();
+
+        let (None, Some(tmdb)) = (cached, self.tmdb.clone()) else {
+            return;
+        };
+        let paths = self.paths.clone();
+        cx.spawn(async move |this, cx| {
+            let fetched =
+                cx.background_executor()
+                    .spawn(async move {
+                        library_sync::known_for(&paths, &tmdb, person_id, KNOWN_FOR_LIMIT)
+                    })
+                    .await;
+            this.update(cx, |view, cx| {
+                let result = match fetched {
+                    Ok(found) => {
+                        let titles: Rc<Vec<KnownTitle>> = Rc::new(
+                            found
+                                .into_iter()
+                                .map(|(credit, thumb)| KnownTitle {
+                                    credit,
+                                    thumb: thumb.and_then(|p| p.to_str().map(str::to_string)),
+                                })
+                                .collect(),
+                        );
+                        view.known_for.insert(person_id, titles.clone());
+                        KnownFor::Ready(titles)
+                    }
+                    Err(e) => {
+                        tracing::warn!("known for: {e:#}");
+                        KnownFor::Unavailable
+                    }
+                };
+                // Only if they're still looking at the same person.
+                if let Some(person) = view
+                    .cast_pane
+                    .as_mut()
+                    .and_then(|p| p.person.as_mut())
+                    .filter(|p| p.member.person_id == person_id)
+                {
+                    person.known_for = result;
+                    cx.notify();
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Whether a TMDB title is already in the library (it's then shown under "In your
+    /// library" instead).
+    fn in_library(&self, kind: ItemKind, tmdb_id: i64) -> bool {
+        let list = match kind {
+            ItemKind::Movie => &self.movies,
+            ItemKind::Show => &self.shows,
+        };
+        list.iter()
+            .any(|i| i.metadata.as_ref().and_then(|m| m.tmdb_id) == Some(tmdb_id))
+    }
+
+    /// "Known for": the person's best-known titles you don't have, each opening its TMDB page.
+    fn known_for_section(&self, person: &PersonView, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let heading = div()
+            .text_sm()
+            .font_weight(FontWeight::SEMIBOLD)
+            .text_color(theme::text_secondary())
+            .child("Known for");
+        let body: AnyElement = match &person.known_for {
+            KnownFor::Unavailable => return None,
+            KnownFor::Loading => div()
+                .text_sm()
+                .text_color(theme::text_tertiary())
+                .child("Loading…")
+                .into_any_element(),
+            KnownFor::Ready(titles) => {
+                let posters: Vec<AnyElement> = titles
+                    .iter()
+                    .filter(|t| !self.in_library(t.credit.kind, t.credit.tmdb_id))
+                    .enumerate()
+                    .map(|(ix, t)| self.known_title_card(ix, t, cx))
+                    .collect();
+                if posters.is_empty() {
+                    return None;
+                }
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .gap_4()
+                    .children(posters)
+                    .into_any_element()
+            }
+        };
+        Some(
+            div()
+                .flex()
+                .flex_col()
+                .gap_3()
+                .child(heading)
+                .child(body)
+                .into_any_element(),
+        )
+    }
+
+    fn known_title_card(&self, ix: usize, t: &KnownTitle, cx: &mut Context<Self>) -> AnyElement {
+        let credit = &t.credit;
+        let url = format!(
+            "https://www.themoviedb.org/{}/{}",
+            match credit.kind {
+                ItemKind::Movie => "movie",
+                ItemKind::Show => "tv",
+            },
+            credit.tmdb_id
+        );
+        let detail = match (credit.year, &credit.character) {
+            (Some(year), Some(c)) => format!("{year} · {c}"),
+            (Some(year), None) => year.to_string(),
+            (None, Some(c)) => c.clone(),
+            (None, None) => String::new(),
+        };
+        div()
+            .id(("known-for", ix))
+            .tab_index(0)
+            .focus_visible(theme::focus_ring)
+            .w(px(CREDIT_POSTER_W))
+            .flex()
+            .flex_col()
+            .gap_2()
+            .cursor_pointer()
+            .tooltip(theme::text_tooltip("Open on TMDB"))
+            .on_click(cx.listener(move |_, _, _, cx| cx.open_url(&url)))
+            .child(
+                div()
+                    .w(px(CREDIT_POSTER_W))
+                    .h(px(CREDIT_POSTER_W * 1.5))
+                    .rounded(px(8.))
+                    .overflow_hidden()
+                    .bg(theme::placeholder(&credit.title, None))
+                    .child(art_layer(t.thumb.clone(), 8., ART_THUMB * 2)),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_weight(FontWeight::MEDIUM)
+                            .truncate()
+                            .child(credit.title.clone()),
+                    )
+                    .when(!detail.is_empty(), |d| {
+                        d.child(
+                            div()
+                                .text_xs()
+                                .text_color(theme::text_tertiary())
+                                .truncate()
+                                .child(detail),
+                        )
+                    }),
+            )
+            .into_any_element()
     }
 
     pub(super) fn render_cast_pane(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -383,6 +572,7 @@ impl LibraryView {
             .character
             .as_ref()
             .map(|c| format!("{c} in {}", pane.title));
+        let known_for = self.known_for_section(person, cx);
         let posters = person
             .credits
             .iter()
@@ -523,6 +713,7 @@ impl LibraryView {
                     })
                     .child(div().flex().flex_wrap().gap_4().children(posters)),
             )
+            .children(known_for)
             .child(self.person_scroll.scrollbar(cx.entity_id()))
             .into_any_element()
     }

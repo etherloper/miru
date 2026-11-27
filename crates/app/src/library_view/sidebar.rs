@@ -346,6 +346,20 @@ impl LibraryView {
                                     Tab::Shows,
                                     cx,
                                 ),
+                                NavItem::Watchlist => {
+                                    let row = item(
+                                        "nav-watchlist",
+                                        nav.label(),
+                                        "icons/bookmark.svg",
+                                        matches!(self.page, Page::Watchlist),
+                                        Box::new(cx.listener(|this, _, _, cx| {
+                                            if !matches!(this.page, Page::Watchlist) {
+                                                this.navigate(Page::Watchlist, cx);
+                                            }
+                                        })),
+                                    );
+                                    self.side_tip(collapsed, row, "nav-watchlist", nav.label(), cx)
+                                }
                             })),
                     )
                     .child(collections),
